@@ -2390,12 +2390,17 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
     # 生图/思维链等阶段可能会出现“上游长时间无输出”，这里通过：
     # 1) 禁用 read timeout（避免 httpx 自己掐断）
     # 2) 在下游 SSE 定期发送心跳（避免客户端/代理超时断开）
-    heartbeat_interval_seconds = 8.0
+    heartbeat_interval_seconds = float(os.getenv("STREAM_HEARTBEAT_SECONDS", "5"))
+    heartbeat_mode = (os.getenv("STREAM_HEARTBEAT_MODE", "chunk") or "chunk").lower()
     last_yield_ts = time.time()
-    heartbeat_chunk = None
+    heartbeat_payload = None
     if is_stream:
-        # 发送一个“空内容”chunk 作为心跳：保持 OpenAI SSE 格式，不污染输出
-        heartbeat_chunk = create_chunk(chat_id, created_time, model_name, {"content": ""}, None)
+        if heartbeat_mode == "comment":
+            heartbeat_payload = ": keep-alive\n\n"
+        else:
+            # 用标准 data chunk 作为心跳，兼容严格的网关/客户端
+            heartbeat_chunk = create_chunk(chat_id, created_time, model_name, {"content": ""}, None)
+            heartbeat_payload = f"data: {heartbeat_chunk}\n\n"
 
     async with http_client.stream(
         "POST",
@@ -2429,17 +2434,12 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
 
             try:
                 while True:
-                    # 客户端已断开：尽快结束，避免无意义占用连接
-                    if request is not None and await request.is_disconnected():
-                        logger.warning(f"[API] [{account_manager.config.account_id}] [req_{request_id}] 客户端断开，终止流式输出")
-                        break
-
                     try:
                         json_obj = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval_seconds)
                     except asyncio.TimeoutError:
                         # 上游在一段时间内没有任何输出：发送心跳保持连接
-                        if is_stream and heartbeat_chunk and (time.time() - last_yield_ts) >= heartbeat_interval_seconds:
-                            yield f"data: {heartbeat_chunk}\n\n"
+                        if is_stream and heartbeat_payload and (time.time() - last_yield_ts) >= heartbeat_interval_seconds:
+                            yield heartbeat_payload
                             last_yield_ts = time.time()
 
                         # 若已结束且队列为空，退出
