@@ -1,13 +1,11 @@
 services:
   gemini-api:
-    image: cooooookk/gemini-business2api:latest
+    image: ghcr.io/ishalumi/gemini-business2api:latest
     container_name: gemini-business2api
     ports:
       - "7860:7860"
     volumes:
       - ./data:/app/data
-      - ./main.py:/app/main.py
-      - ./core:/app/core
     env_file:
       - .env
     restart: unless-stopped
