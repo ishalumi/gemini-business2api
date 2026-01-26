@@ -9,4 +9,12 @@ export const logsApi = {
   // 清空日志
   clear: () =>
     apiClient.delete('/admin/log?confirm=yes'),
+
+  // 获取安全日志
+  listSecurity: (params?: { limit?: number; level?: string; search?: string }) =>
+    apiClient.get<never, AdminLogsResponse>('/admin/security/log', { params }),
+
+  // 清空安全日志
+  clearSecurity: () =>
+    apiClient.delete('/admin/security/log?confirm=yes'),
 }

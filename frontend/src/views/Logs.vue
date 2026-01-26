@@ -1,9 +1,12 @@
 ﻿<template>
   <div class="rounded-3xl border border-border bg-card p-6">
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <p class="text-base font-semibold text-foreground">管理日志</p>
-      <div class="text-xs text-muted-foreground">
-        自动刷新：{{ autoRefreshEnabled ? '开启' : '关闭' }}
+      <p class="text-base font-semibold text-foreground">{{ pageTitle }}</p>
+      <div class="flex items-center gap-2 text-xs text-muted-foreground">
+        <div class="w-28">
+          <SelectMenu v-model="logSource" :options="logSourceOptions" />
+        </div>
+        <span>自动刷新：{{ autoRefreshEnabled ? '开启' : '关闭' }}</span>
       </div>
     </div>
 
@@ -13,7 +16,7 @@
         <div class="mt-1 text-lg font-semibold text-foreground">{{ stats?.memory.total ?? 0 }}</div>
       </div>
       <div class="rounded-2xl border border-border bg-card px-4 py-3 text-center">
-        <div class="text-[11px] text-muted-foreground">对话</div>
+        <div class="text-[11px] text-muted-foreground">{{ countLabel }}</div>
         <div class="mt-1 text-lg font-semibold text-foreground">{{ stats?.chat_count ?? 0 }}</div>
       </div>
       <div class="rounded-2xl border border-border bg-card px-4 py-3 text-center">
@@ -199,19 +202,19 @@
     </div>
   </div>
 
-  <ConfirmDialog
-    :open="confirmOpen"
-    title="确认操作"
-    message="确定要清空所有运行日志吗？"
-    confirm-text="确认"
-    cancel-text="取消"
-    @confirm="clearLogs"
-    @cancel="confirmOpen = false"
-  />
+    <ConfirmDialog
+      :open="confirmOpen"
+      title="确认操作"
+      :message="confirmMessage"
+      confirm-text="确认"
+      cancel-text="取消"
+      @confirm="clearLogs"
+      @cancel="confirmOpen = false"
+    />
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { logsApi } from '@/api'
 import SelectMenu from '@/components/ui/SelectMenu.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -256,6 +259,7 @@ const groupLogLimit = 200
 const refreshIntervalMs = 3000
 let timer: number | undefined
 let isFetching = false
+const logSource = ref<'system' | 'security'>('system')
 
 const filters = reactive({
   level: '',
@@ -268,6 +272,11 @@ const levelOptions = [
   { label: 'INFO', value: 'INFO' },
   { label: 'WARNING', value: 'WARNING' },
   { label: 'ERROR', value: 'ERROR' },
+]
+
+const logSourceOptions = [
+  { label: '管理日志', value: 'system' },
+  { label: '安全日志', value: 'security' },
 ]
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -294,6 +303,11 @@ const ACCOUNT_COLORS: Record<string, string> = {
 
 const statusToneClass = computed(() =>
   statusTone.value === 'error' ? 'text-destructive' : 'text-muted-foreground'
+)
+const pageTitle = computed(() => (logSource.value === 'security' ? '安全日志' : '管理日志'))
+const countLabel = computed(() => (logSource.value === 'security' ? '安全事件' : '对话'))
+const confirmMessage = computed(() =>
+  logSource.value === 'security' ? '确定要清空所有安全日志吗？' : '确定要清空所有运行日志吗？'
 )
 
 const getCategoryColor = (category: string) => CATEGORY_COLORS[category] || '#757575'
@@ -494,7 +508,13 @@ const fetchLogs = async () => {
   statusMessage.value = ''
   normalizeLimit()
   try {
-    const response = await logsApi.list({
+    const response = logSource.value === 'security'
+      ? await logsApi.listSecurity({
+        limit: filters.limit,
+        level: filters.level || undefined,
+        search: filters.search || undefined,
+      })
+      : await logsApi.list({
       limit: filters.limit,
       level: filters.level || undefined,
       search: filters.search || undefined,
@@ -515,7 +535,13 @@ const exportLogs = async () => {
   statusMessage.value = ''
   statusTone.value = 'success'
   try {
-    const response = await logsApi.list({
+    const response = logSource.value === 'security'
+      ? await logsApi.listSecurity({
+        limit: 1000,
+        level: filters.level || undefined,
+        search: filters.search || undefined,
+      })
+      : await logsApi.list({
       limit: 1000,
       level: filters.level || undefined,
       search: filters.search || undefined,
@@ -540,7 +566,11 @@ const exportLogs = async () => {
 const clearLogs = async () => {
   confirmOpen.value = false
   try {
-    await logsApi.clear()
+    if (logSource.value === 'security') {
+      await logsApi.clearSecurity()
+    } else {
+      await logsApi.clear()
+    }
     statusTone.value = 'success'
     statusMessage.value = '已清空日志'
     await fetchLogs()
@@ -613,6 +643,10 @@ onMounted(() => {
   fetchLogs()
   startAutoRefresh()
   document.addEventListener('visibilitychange', handleVisibilityChange)
+})
+
+watch(logSource, () => {
+  fetchLogs()
 })
 
 onBeforeUnmount(() => {

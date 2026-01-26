@@ -89,6 +89,8 @@ MODEL_TO_QUOTA_TYPE = {
 # 内存日志缓冲区 (保留最近 1000 条日志，重启后清空)
 log_buffer = deque(maxlen=1000)
 log_lock = Lock()
+security_log_buffer = deque(maxlen=1000)
+security_log_lock = Lock()
 
 # 统计数据持久化
 stats_lock = asyncio.Lock()  # 改为异步锁
@@ -257,6 +259,33 @@ class MemoryLogHandler(logging.Handler):
                 "level": record.levelname,
                 "message": record.getMessage()
             })
+
+
+def _append_security_log(
+    level: str,
+    message: str,
+    ip: str = "",
+    path: str = "",
+    reason: str = "",
+    extra: str = "",
+) -> None:
+    beijing_tz = timezone(timedelta(hours=8))
+    beijing_time = datetime.now(tz=beijing_tz)
+    parts = ["[SECURITY]", message]
+    if ip:
+        parts.append(f"ip={ip}")
+    if path:
+        parts.append(f"path={path}")
+    if reason:
+        parts.append(f"reason={reason}")
+    if extra:
+        parts.append(extra)
+    with security_log_lock:
+        security_log_buffer.append({
+            "time": beijing_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "level": level.upper(),
+            "message": " ".join(parts),
+        })
 
 # 配置日志
 logging.basicConfig(
@@ -594,7 +623,8 @@ _security_404_hits: Dict[str, deque] = {}
 _security_login_fail_hits: Dict[str, deque] = {}
 _security_temp_bans: Dict[str, Dict[str, Any]] = {}
 _security_temp_ban_counts: Dict[str, int] = {}
-_security_perm_bans: Dict[str, float] = {}  # ip -> banned_at
+_security_perm_bans: Dict[str, Dict[str, Any]] = {}  # ip -> {banned_at, reason, count}
+_security_blocked_last_log: Dict[str, float] = {}
 
 
 def get_client_ip_for_security(request: Request) -> str:
@@ -626,9 +656,10 @@ async def _security_ban_temp(ip: str, reason: str) -> None:
     _security_temp_ban_counts[ip] = count
 
     if count >= SECURITY_MAX_TEMP_BANS_BEFORE_PERM:
-        _security_perm_bans[ip] = now
+        _security_perm_bans[ip] = {"banned_at": now, "reason": reason, "count": count}
         _security_temp_bans.pop(ip, None)
         logger.warning(f"[SECURITY] IP 永久封禁: {ip} (reason={reason}, temp_bans={count})")
+        _append_security_log("WARNING", "IP 永久封禁", ip=ip, reason=reason, extra=f"temp_bans={count}")
         return
 
     _security_temp_bans[ip] = {
@@ -638,6 +669,17 @@ async def _security_ban_temp(ip: str, reason: str) -> None:
         "count": count,
     }
     logger.warning(f"[SECURITY] IP 暂时封禁: {ip} {SECURITY_TEMP_BAN_SECONDS}s (reason={reason}, temp_bans={count})")
+    _append_security_log("WARNING", "IP 暂时封禁", ip=ip, reason=reason, extra=f"temp_bans={count}")
+
+
+def _security_get_ban_info(ip: str) -> Dict[str, Any]:
+    if ip in _security_perm_bans:
+        info = _security_perm_bans.get(ip) or {}
+        return {"type": "permanent", "reason": info.get("reason", "unknown"), "detail": info}
+    ban = _security_temp_bans.get(ip)
+    if ban:
+        return {"type": "temporary", "reason": ban.get("reason", "unknown"), "detail": ban}
+    return {}
 
 
 async def _security_check_ban(ip: str) -> Optional[Response]:
@@ -662,7 +704,7 @@ async def _security_check_ban(ip: str) -> Optional[Response]:
     )
 
 
-async def _security_record_404(ip: str) -> None:
+async def _security_record_404(ip: str, path: str) -> None:
     dq = _security_404_hits.get(ip)
     if dq is None:
         dq = deque()
@@ -672,11 +714,19 @@ async def _security_record_404(ip: str) -> None:
     while dq and (time.time() - dq[0]) > SECURITY_404_WINDOW_SECONDS:
         dq.popleft()
     if len(dq) >= SECURITY_404_THRESHOLD:
+        _append_security_log(
+            "WARNING",
+            "命中路径扫描阈值",
+            ip=ip,
+            path=path,
+            reason="path_scan",
+            extra=f"hits={len(dq)}",
+        )
         await _security_ban_temp(ip, reason="path_scan")
         _security_404_hits.pop(ip, None)
 
 
-async def _security_record_login_failure(ip: str) -> None:
+async def _security_record_login_failure(ip: str, username: str = "") -> None:
     dq = _security_login_fail_hits.get(ip)
     if dq is None:
         dq = deque()
@@ -685,6 +735,13 @@ async def _security_record_login_failure(ip: str) -> None:
     while dq and (time.time() - dq[0]) > SECURITY_LOGIN_FAIL_WINDOW_SECONDS:
         dq.popleft()
     if len(dq) >= SECURITY_LOGIN_FAIL_THRESHOLD:
+        _append_security_log(
+            "WARNING",
+            "登录失败触发封禁阈值",
+            ip=ip,
+            reason="login_bruteforce",
+            extra=f"hits={len(dq)} username={username}" if username else f"hits={len(dq)}",
+        )
         await _security_ban_temp(ip, reason="login_bruteforce")
         _security_login_fail_hits.pop(ip, None)
 
@@ -704,6 +761,19 @@ async def security_ban_middleware(request: Request, call_next):
     async with _security_lock:
         banned = await _security_check_ban(ip)
     if banned is not None:
+        now = time.time()
+        last_logged = _security_blocked_last_log.get(ip, 0)
+        if now - last_logged >= 10:
+            info = _security_get_ban_info(ip)
+            _append_security_log(
+                "WARNING",
+                "请求被拦截",
+                ip=ip,
+                path=path,
+                reason=info.get("reason", "banned"),
+                extra=f"type={info.get('type', 'unknown')}",
+            )
+            _security_blocked_last_log[ip] = now
         return banned
 
     response = await call_next(request)
@@ -713,7 +783,8 @@ async def security_ban_middleware(request: Request, call_next):
         async with _security_lock:
             # 再次检查（避免刚被 ban 后仍记录）
             if ip not in _security_perm_bans and ip not in _security_temp_bans:
-                await _security_record_404(ip)
+                _append_security_log("WARNING", "异常路径访问", ip=ip, path=path, reason="404")
+                await _security_record_404(ip, path)
 
     return response
 
@@ -1125,7 +1196,15 @@ async def admin_login_post(request: Request, username: str = Form(...), password
     logger.warning("[AUTH] Login failed - invalid credentials")
     if SECURITY_ENABLED:
         async with _security_lock:
-            await _security_record_login_failure(ip)
+            _append_security_log(
+                "WARNING",
+                "登录失败",
+                ip=ip,
+                path=request.url.path,
+                reason="invalid_credentials",
+                extra=f"username={username}",
+            )
+            await _security_record_login_failure(ip, username=username)
     raise HTTPException(401, "Invalid credentials")
 
 
@@ -1929,6 +2008,65 @@ async def admin_clear_logs(request: Request, confirm: str = None):
         log_buffer.clear()
     logger.info("[LOG] 日志已清空")
     return {"status": "success", "message": "已清空内存日志", "cleared_count": cleared_count}
+
+
+@app.get("/admin/security/log")
+@require_login()
+async def admin_get_security_logs(
+    request: Request,
+    limit: int = 300,
+    level: str = None,
+    search: str = None,
+    start_time: str = None,
+    end_time: str = None
+):
+    with security_log_lock:
+        logs = list(security_log_buffer)
+
+    stats_by_level = {}
+    error_logs = []
+    for log in logs:
+        level_name = log.get("level", "INFO")
+        stats_by_level[level_name] = stats_by_level.get(level_name, 0) + 1
+        if level_name in ["ERROR", "CRITICAL", "WARNING"]:
+            error_logs.append(log)
+
+    if level:
+        level = level.upper()
+        logs = [log for log in logs if log["level"] == level]
+    if search:
+        logs = [log for log in logs if search.lower() in log["message"].lower()]
+    if start_time:
+        logs = [log for log in logs if log["time"] >= start_time]
+    if end_time:
+        logs = [log for log in logs if log["time"] <= end_time]
+
+    limit = min(limit, security_log_buffer.maxlen)
+    filtered_logs = logs[-limit:]
+
+    return {
+        "total": len(filtered_logs),
+        "limit": limit,
+        "filters": {"level": level, "search": search, "start_time": start_time, "end_time": end_time},
+        "logs": filtered_logs,
+        "stats": {
+            "memory": {"total": len(security_log_buffer), "by_level": stats_by_level, "capacity": security_log_buffer.maxlen},
+            "errors": {"count": len(error_logs), "recent": error_logs[-10:]},
+            "chat_count": len(security_log_buffer)
+        }
+    }
+
+
+@app.delete("/admin/security/log")
+@require_login()
+async def admin_clear_security_logs(request: Request, confirm: str = None):
+    if confirm != "yes":
+        raise HTTPException(400, "需要 confirm=yes 参数确认清空操作")
+    with security_log_lock:
+        cleared_count = len(security_log_buffer)
+        security_log_buffer.clear()
+    logger.info("[SECURITY] 安全日志已清空")
+    return {"status": "success", "message": "已清空安全日志", "cleared_count": cleared_count}
 
 # ---------- Auth endpoints (API) ----------
 
