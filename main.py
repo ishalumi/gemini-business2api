@@ -515,21 +515,11 @@ logger.info("[SYSTEM] 系统初始化完成")
 # (消息处理函数已移至 core/message.py)
 
 # ---------- 媒体处理函数 ----------
-def process_image(
-    data: bytes,
-    mime: str,
-    chat_id: str,
-    file_id: str,
-    base_url: str,
-    idx: int,
-    request_id: str,
-    account_id: str,
-    force_url: bool = False
-) -> str:
-    """处理图片：根据配置返回 base64 或 URL（可强制 URL）"""
+def process_image(data: bytes, mime: str, chat_id: str, file_id: str, base_url: str, idx: int, request_id: str, account_id: str) -> str:
+    """处理图片：根据配置返回 base64 或 URL"""
     output_format = config_manager.image_output_format
 
-    if output_format == "base64" and not force_url:
+    if output_format == "base64":
         b64 = base64.b64encode(data).decode()
         logger.info(f"[IMAGE] [{account_id}] [req_{request_id}] 图片{idx}已编码为base64")
         return f"\n\n![生成的图片](data:{mime};base64,{b64})\n\n"
@@ -552,23 +542,13 @@ def process_video(data: bytes, mime: str, chat_id: str, file_id: str, base_url: 
     else:  # url
         return f"\n\n{url}\n\n"
 
-def process_media(
-    data: bytes,
-    mime: str,
-    chat_id: str,
-    file_id: str,
-    base_url: str,
-    idx: int,
-    request_id: str,
-    account_id: str,
-    force_url: bool = False
-) -> str:
+def process_media(data: bytes, mime: str, chat_id: str, file_id: str, base_url: str, idx: int, request_id: str, account_id: str) -> str:
     """统一媒体处理入口：根据 MIME 类型分发到对应处理器"""
     logger.info(f"[MEDIA] [{account_id}] [req_{request_id}] 处理媒体{idx}: MIME={mime}")
     if mime.startswith("video/"):
         return process_video(data, mime, chat_id, file_id, base_url, idx, request_id, account_id)
     else:
-        return process_image(data, mime, chat_id, file_id, base_url, idx, request_id, account_id, force_url=force_url)
+        return process_image(data, mime, chat_id, file_id, base_url, idx, request_id, account_id)
 
 # ---------- OpenAI 兼容接口 ----------
 app = FastAPI(title="Gemini-Business OpenAI Gateway")
