@@ -352,11 +352,16 @@ const menuItems = [
     label: '监控状态',
     icon: 'M3 12h4l2-4 4 8 3-6h5v2h-4l-4 8-4-8-2 4H3v-2z',
   },
-          {
-            path: '/logs',
-            label: '运行日志',
-            icon: 'M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z',
-          },
+  {
+    path: '/logs',
+    label: '运行日志',
+    icon: 'M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z',
+  },
+  {
+    path: '/security-logs',
+    label: '安全日志',
+    icon: 'M12 2l7 3v6c0 5-3.5 9.74-7 11-3.5-1.26-7-6-7-11V5l7-3zm0 4.3L8 7.5V11c0 3.4 2.1 6.7 4 7.7 1.9-1 4-4.3 4-7.7V7.5l-4-1.2z',
+  },
           {
             path: '/docs',
             label: '文档中心',

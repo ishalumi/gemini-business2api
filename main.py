@@ -1157,6 +1157,12 @@ class ChatRequest(BaseModel):
     temperature: Optional[float] = 0.7
     top_p: Optional[float] = 1.0
 
+
+class ImageGenerationRequest(BaseModel):
+    prompt: Union[str, List[str]] = ""
+    model: Optional[str] = None
+    response_format: Optional[str] = None
+
 def create_chunk(id: str, created: int, model: str, delta: dict, finish_reason: Union[str, None]) -> str:
     chunk = {
         "id": id,
@@ -2096,6 +2102,50 @@ async def chat(
     verify_api_key(API_KEY, authorization)
     # ... (保留原有的chat逻辑)
     return await chat_impl(req, request, authorization)
+
+
+@app.post("/v1/images/generations")
+async def images_generations(
+    payload: ImageGenerationRequest,
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    verify_api_key(API_KEY, authorization)
+    model = (payload.model or "gemini-imagen").strip() or "gemini-imagen"
+    prompt = payload.prompt or ""
+    if isinstance(prompt, list):
+        prompt = "\n".join([str(item) for item in prompt if item is not None])
+    prompt = str(prompt)
+
+    chat_req = ChatRequest(
+        model=model,
+        messages=[Message(role="user", content=prompt)],
+        stream=False,
+    )
+    result = await chat_impl(chat_req, request, authorization)
+
+    content = ""
+    try:
+        content = (result.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
+    except Exception:
+        content = ""
+
+    image_links = re.findall(r"!\[[^\]]*\]\(([^)]+)\)", content)
+    data: List[Dict[str, str]] = []
+    for link in image_links:
+        if link.startswith("data:") and "base64," in link:
+            b64 = link.split("base64,", 1)[1]
+            data.append({"b64_json": b64})
+        elif link:
+            data.append({"url": link})
+
+    response_format = (payload.response_format or "").lower()
+    if response_format == "b64_json":
+        data = [item for item in data if "b64_json" in item]
+    elif response_format == "url":
+        data = [item for item in data if "url" in item]
+
+    return {"created": int(time.time()), "data": data}
 
 # chat实现函数
 async def chat_impl(

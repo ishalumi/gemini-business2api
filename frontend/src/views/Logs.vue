@@ -3,7 +3,7 @@
     <div class="flex flex-wrap items-center justify-between gap-3">
       <p class="text-base font-semibold text-foreground">{{ pageTitle }}</p>
       <div class="flex items-center gap-2 text-xs text-muted-foreground">
-        <div class="w-28">
+        <div v-if="!props.hideSourceSelector" class="w-28">
           <SelectMenu v-model="logSource" :options="logSourceOptions" />
         </div>
         <span>自动刷新：{{ autoRefreshEnabled ? '开启' : '关闭' }}</span>
@@ -240,6 +240,11 @@ type GroupedLogState = {
   groups: GroupedLog[]
 }
 
+const props = defineProps<{
+  initialSource?: 'system' | 'security'
+  hideSourceSelector?: boolean
+}>()
+
 const logs = ref<LogEntry[]>([])
 const parsedLogs = ref<ParsedLogEntry[]>([])
 const groupedLogs = ref<GroupedLogState>({ ungrouped: [], groups: [] })
@@ -259,7 +264,7 @@ const groupLogLimit = 200
 const refreshIntervalMs = 3000
 let timer: number | undefined
 let isFetching = false
-const logSource = ref<'system' | 'security'>('system')
+const logSource = ref<'system' | 'security'>(props.initialSource || 'system')
 
 const filters = reactive({
   level: '',
@@ -648,6 +653,15 @@ onMounted(() => {
 watch(logSource, () => {
   fetchLogs()
 })
+
+watch(
+  () => props.initialSource,
+  (value) => {
+    if (value && value !== logSource.value) {
+      logSource.value = value
+    }
+  }
+)
 
 onBeforeUnmount(() => {
   stopAutoRefresh()

@@ -42,6 +42,11 @@ const router = createRouter({
           component: () => import('@/views/Logs.vue'),
         },
         {
+          path: 'security-logs',
+          name: 'security-logs',
+          component: () => import('@/views/SecurityLogs.vue'),
+        },
+        {
           path: 'monitor',
           name: 'monitor',
           component: () => import('@/views/Monitor.vue'),
