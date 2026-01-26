@@ -433,6 +433,17 @@
                       />
                     </div>
                     <div class="space-y-2">
+                      <label for="retry-stream-auto-retry" class="text-xs text-muted-foreground">流式不完整重试次数</label>
+                      <input
+                        id="retry-stream-auto-retry"
+                        v-model.number="localSettings.retry.stream_auto_retry_times"
+                        type="number"
+                        min="0"
+                        max="5"
+                        class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div class="space-y-2">
                       <label for="retry-account-switch-tries" class="text-xs text-muted-foreground">账号切换次数</label>
                       <input
                         id="retry-account-switch-tries"
@@ -752,6 +763,9 @@ watch(settings, (value) => {
     ? next.automation.between_account_max_seconds
     : 0
   next.retry = next.retry || {}
+  next.retry.stream_auto_retry_times = Number.isFinite(next.retry.stream_auto_retry_times)
+    ? next.retry.stream_auto_retry_times
+    : 1
   next.retry.auto_refresh_accounts_seconds = Number.isFinite(next.retry.auto_refresh_accounts_seconds)
     ? next.retry.auto_refresh_accounts_seconds
     : 60

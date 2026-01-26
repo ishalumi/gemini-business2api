@@ -94,6 +94,7 @@ class RetryConfig(BaseModel):
     max_request_retries: int = Field(default=3, ge=1, le=10, description="请求失败重试次数")
     max_account_switch_tries: int = Field(default=5, ge=1, le=20, description="账户切换尝试次数")
     account_failure_threshold: int = Field(default=3, ge=1, le=10, description="账户失败阈值")
+    stream_auto_retry_times: int = Field(default=1, ge=0, le=5, description="流式输出不完整自动重试次数")
     rate_limit_cooldown_seconds: int = Field(default=3600, ge=60, le=43200, description="429冷却时间（秒，设置面板按分钟）")
     session_cache_ttl_seconds: int = Field(default=3600, ge=0, le=86400, description="会话缓存时间（秒，0表示禁用缓存）")
     auto_refresh_accounts_seconds: int = Field(default=60, ge=0, le=600, description="自动刷新账号间隔（秒，0禁用）")
@@ -448,6 +449,11 @@ class ConfigManager:
     def account_failure_threshold(self) -> int:
         """账户失败阈值"""
         return self._config.retry.account_failure_threshold
+
+    @property
+    def stream_auto_retry_times(self) -> int:
+        """流式输出不完整自动重试次数"""
+        return self._config.retry.stream_auto_retry_times
 
     @property
     def rate_limit_cooldown_seconds(self) -> int:

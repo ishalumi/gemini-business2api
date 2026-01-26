@@ -84,6 +84,12 @@ MODEL_TO_QUOTA_TYPE = {
     "gemini-veo": "videos"
 }
 
+class StreamIncompleteError(RuntimeError):
+    """流式响应未完整返回（例如未拿到生成媒体）"""
+    def __init__(self, reason: str = "stream_incomplete"):
+        super().__init__(reason)
+        self.reason = reason
+
 # ---------- 日志配置 ----------
 
 # 内存日志缓冲区 (保留最近 1000 条日志，重启后清空)
@@ -361,6 +367,7 @@ MAX_NEW_SESSION_TRIES = config.retry.max_new_session_tries
 MAX_REQUEST_RETRIES = config.retry.max_request_retries
 MAX_ACCOUNT_SWITCH_TRIES = config.retry.max_account_switch_tries
 ACCOUNT_FAILURE_THRESHOLD = config.retry.account_failure_threshold
+STREAM_AUTO_RETRY_TIMES = config.retry.stream_auto_retry_times
 RATE_LIMIT_COOLDOWN_SECONDS = config.retry.rate_limit_cooldown_seconds
 SESSION_CACHE_TTL_SECONDS = config.retry.session_cache_ttl_seconds
 AUTO_REFRESH_ACCOUNTS_SECONDS = config.retry.auto_refresh_accounts_seconds
@@ -1751,6 +1758,7 @@ async def admin_get_settings(request: Request):
             "max_request_retries": config.retry.max_request_retries,
             "max_account_switch_tries": config.retry.max_account_switch_tries,
             "account_failure_threshold": config.retry.account_failure_threshold,
+            "stream_auto_retry_times": config.retry.stream_auto_retry_times,
             "rate_limit_cooldown_seconds": config.retry.rate_limit_cooldown_seconds,
             "session_cache_ttl_seconds": config.retry.session_cache_ttl_seconds,
             "auto_refresh_accounts_seconds": config.retry.auto_refresh_accounts_seconds
@@ -1783,7 +1791,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
     global API_KEY, PROXY_FOR_AUTH, PROXY_FOR_CHAT, BASE_URL, LOGO_URL, CHAT_URL
     global IMAGE_GENERATION_ENABLED, IMAGE_GENERATION_MODELS
     global MAX_NEW_SESSION_TRIES, MAX_REQUEST_RETRIES, MAX_ACCOUNT_SWITCH_TRIES
-    global ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS, SESSION_CACHE_TTL_SECONDS, AUTO_REFRESH_ACCOUNTS_SECONDS
+    global ACCOUNT_FAILURE_THRESHOLD, STREAM_AUTO_RETRY_TIMES, RATE_LIMIT_COOLDOWN_SECONDS, SESSION_CACHE_TTL_SECONDS, AUTO_REFRESH_ACCOUNTS_SECONDS
     global SESSION_EXPIRE_HOURS, multi_account_mgr, http_client, http_client_chat, http_client_auth
 
     try:
@@ -1830,6 +1838,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
 
         retry = dict(new_settings.get("retry") or {})
         retry.setdefault("auto_refresh_accounts_seconds", config.retry.auto_refresh_accounts_seconds)
+        retry.setdefault("stream_auto_retry_times", config.retry.stream_auto_retry_times)
         new_settings["retry"] = retry
 
         automation = dict(new_settings.get("automation") or {})
@@ -1873,6 +1882,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         MAX_REQUEST_RETRIES = config.retry.max_request_retries
         MAX_ACCOUNT_SWITCH_TRIES = config.retry.max_account_switch_tries
         ACCOUNT_FAILURE_THRESHOLD = config.retry.account_failure_threshold
+        STREAM_AUTO_RETRY_TIMES = config.retry.stream_auto_retry_times
         RATE_LIMIT_COOLDOWN_SECONDS = config.retry.rate_limit_cooldown_seconds
         SESSION_CACHE_TTL_SECONDS = config.retry.session_cache_ttl_seconds
         AUTO_REFRESH_ACCOUNTS_SECONDS = config.retry.auto_refresh_accounts_seconds
@@ -2315,8 +2325,10 @@ async def chat_impl(
     async def response_wrapper():
         nonlocal account_manager  # 允许修改外层的 account_manager
 
-        retry_count = 0
-        max_retries = MAX_REQUEST_RETRIES  # 使用配置的最大重试次数
+        request_retry_count = 0
+        max_request_retries = MAX_REQUEST_RETRIES  # 请求失败重试次数
+        incomplete_retry_count = 0
+        max_incomplete_retries = STREAM_AUTO_RETRY_TIMES  # 流式不完整自动重试次数
 
         current_text = text_to_send
         current_retry_mode = is_retry_mode
@@ -2331,7 +2343,7 @@ async def chat_impl(
         current_session = google_session
 
         # 重试逻辑：最多尝试 max_retries+1 次（初次+重试）
-        while retry_count <= max_retries:
+        while True:
             try:
                 if not current_session:
                     logger.warning(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] Session为空，重建Session")
@@ -2384,6 +2396,27 @@ async def chat_impl(
 
                 break
 
+            except StreamIncompleteError as e:
+                incomplete_retry_count += 1
+
+                if max_incomplete_retries > 0 and incomplete_retry_count <= max_incomplete_retries:
+                    logger.warning(
+                        f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] "
+                        f"流式输出不完整，自动重试 ({incomplete_retry_count}/{max_incomplete_retries})"
+                    )
+                    current_session = None
+                    current_retry_mode = True
+                    current_file_ids = []
+                    continue
+
+                logger.error(
+                    f"[CHAT] [req_{request_id}] 流式输出不完整，已达到最大自动重试次数 ({max_incomplete_retries})"
+                )
+                await finalize_result("error", 504, f"Stream incomplete: {str(e)[:100]}")
+                if req.stream:
+                    yield f"data: {json.dumps({'error': {'message': 'Stream incomplete'}})}\n\n"
+                return
+
             except (httpx.HTTPError, ssl.SSLError, HTTPException) as e:
                 # 提取错误信息
                 is_http_exception = isinstance(e, HTTPException)
@@ -2410,11 +2443,11 @@ async def chat_impl(
                 else:
                     account_manager.handle_non_http_error("聊天请求", request_id)
 
-                retry_count += 1
+                request_retry_count += 1
 
                 # 检查是否还能继续重试
-                if retry_count <= max_retries:
-                    logger.warning(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 正在重试 ({retry_count}/{max_retries})")
+                if request_retry_count <= max_request_retries:
+                    logger.warning(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 正在重试 ({request_retry_count}/{max_request_retries})")
 
                     # 快速失败：检查是否还有可用账户（避免无效重试）
                     available_count = sum(
@@ -2477,10 +2510,10 @@ async def chat_impl(
                         return
                 else:
                     # 已达到最大重试次数
-                    logger.error(f"[CHAT] [req_{request_id}] 已达到最大重试次数 ({max_retries})，请求失败")
+                    logger.error(f"[CHAT] [req_{request_id}] 已达到最大重试次数 ({max_request_retries})，请求失败")
                     status = classify_error_status(status_code, e)
                     await finalize_result(status, status_code, error_detail)
-                    if req.stream: yield f"data: {json.dumps({'error': {'message': f'Max retries ({max_retries}) exceeded: {e}'}})}\n\n"
+                    if req.stream: yield f"data: {json.dumps({'error': {'message': f'Max retries ({max_request_retries}) exceeded: {e}'}})}\n\n"
                     return
 
     if req.stream:
@@ -2872,8 +2905,10 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
             chunk = create_chunk(chat_id, created_time, model_name, {"content": error_msg}, None)
             yield f"data: {chunk}\n\n"
     elif expects_media:
-        # 需要生成图片但未检测到文件，提示用户稍后重试
+        # 需要生成图片但未检测到文件：触发自动重试或提示用户
         logger.warning(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 未检测到生成文件")
+        if STREAM_AUTO_RETRY_TIMES > 0:
+            raise StreamIncompleteError("no_media")
         warn_msg = "\n\n⚠️ 未检测到生成文件，可能仍在处理中，请稍后重试。\n\n"
         chunk = create_chunk(chat_id, created_time, model_name, {"content": warn_msg}, None)
         yield f"data: {chunk}\n\n"

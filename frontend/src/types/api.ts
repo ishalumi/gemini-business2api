@@ -104,6 +104,7 @@ export interface Settings {
     max_request_retries: number
     max_account_switch_tries: number
     account_failure_threshold: number
+    stream_auto_retry_times: number
     rate_limit_cooldown_seconds: number
     session_cache_ttl_seconds: number
     auto_refresh_accounts_seconds: number
