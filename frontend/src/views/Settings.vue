@@ -153,6 +153,22 @@
                   placeholder="gpt-test"
                 />
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>MoeMail API</span>
+                  <HelpTip text="临时邮箱服务（API Key 必填）" />
+                </div>
+                <input
+                  v-model="localSettings.basic.moemail_base_url"
+                  type="text"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="https://mail.ishalumi.me"
+                />
+                <input
+                  v-model="localSettings.basic.moemail_api_key"
+                  type="text"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="mk_xxx"
+                />
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>注册邮箱服务商</span>
                   <HelpTip text="注册时使用的邮箱来源" />
                 </div>
@@ -420,6 +436,7 @@ const browserEngineOptions = [
 const mailProviderOptions = [
   { label: 'DuckMail', value: 'duckmail' },
   { label: 'GPTMail', value: 'gptmail' },
+  { label: 'MoeMail', value: 'moemail' },
 ]
 const imageOutputOptions = [
   { label: 'Base64 编码', value: 'base64' },
@@ -460,6 +477,7 @@ watch(settings, (value) => {
   next.basic.duckmail_base_url ||= 'https://api.duckmail.sbs'
   next.basic.duckmail_verify_ssl = next.basic.duckmail_verify_ssl ?? true
   next.basic.gptmail_verify_ssl = next.basic.gptmail_verify_ssl ?? true
+  next.basic.moemail_verify_ssl = next.basic.moemail_verify_ssl ?? true
   next.basic.browser_engine = next.basic.browser_engine || 'dp'
   next.basic.browser_headless = next.basic.browser_headless ?? false
   next.basic.refresh_window_hours = Number.isFinite(next.basic.refresh_window_hours)
@@ -479,6 +497,12 @@ watch(settings, (value) => {
     : 'https://mail.chatgpt.org.uk'
   next.basic.gptmail_api_key = typeof next.basic.gptmail_api_key === 'string'
     ? next.basic.gptmail_api_key
+    : ''
+  next.basic.moemail_base_url = typeof next.basic.moemail_base_url === 'string'
+    ? next.basic.moemail_base_url
+    : 'https://mail.ishalumi.me'
+  next.basic.moemail_api_key = typeof next.basic.moemail_api_key === 'string'
+    ? next.basic.moemail_api_key
     : ''
   next.basic.register_mail_provider = typeof next.basic.register_mail_provider === 'string'
     ? next.basic.register_mail_provider

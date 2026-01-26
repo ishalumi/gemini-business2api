@@ -12,6 +12,7 @@ from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError
 from core.config import config
 from core.duckmail_client import DuckMailClient
 from core.gptmail_client import GPTMailClient
+from core.moemail_client import MoeMailClient
 from core.gemini_automation import GeminiAutomation
 from core.gemini_automation_uc import GeminiAutomationUC
 from core.microsoft_mail_client import MicrosoftMailClient
@@ -186,6 +187,21 @@ class LoginService(BaseTaskService[LoginTask]):
                 log_callback=log_cb,
             )
             client.set_credentials(mail_address)
+        elif mail_provider == "moemail":
+            mail_address = account.get("mail_address") or account_id
+            mail_box_id = account.get("mail_box_id")
+            if not mail_box_id:
+                return {"success": False, "email": account_id, "error": "MoeMail 邮箱 ID 缺失"}
+            if not config.basic.moemail_api_key:
+                return {"success": False, "email": account_id, "error": "MoeMail API Key 缺失"}
+            client = MoeMailClient(
+                base_url=config.basic.moemail_base_url,
+                api_key=config.basic.moemail_api_key,
+                proxy=config.basic.proxy_for_auth,
+                verify_ssl=config.basic.moemail_verify_ssl,
+                log_callback=log_cb,
+            )
+            client.set_credentials(mail_address, mail_box_id)
         elif mail_provider == "duckmail":
             if not mail_password:
                 return {"success": False, "email": account_id, "error": "邮箱密码缺失"}
@@ -304,6 +320,10 @@ class LoginService(BaseTaskService[LoginTask]):
             elif mail_provider == "gptmail":
                 # GPTMail 无需密码
                 pass
+            elif mail_provider == "moemail":
+                # MoeMail 无需密码，但需要邮箱 ID
+                if not account.get("mail_box_id"):
+                    continue
             expires_at = account.get("expires_at")
             if not expires_at:
                 continue

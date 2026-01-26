@@ -48,3 +48,7 @@ old_version.py
 
 # GPT Mail
 gpt-mail/
+moemail/
+
+# Claude
+.claude/

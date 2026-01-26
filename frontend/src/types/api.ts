@@ -87,6 +87,9 @@ export interface Settings {
     gptmail_base_url?: string
     gptmail_api_key?: string
     gptmail_verify_ssl?: boolean
+    moemail_base_url?: string
+    moemail_api_key?: string
+    moemail_verify_ssl?: boolean
     browser_engine?: string
     browser_headless?: boolean
     refresh_window_hours?: number

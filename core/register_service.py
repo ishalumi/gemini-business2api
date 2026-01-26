@@ -12,6 +12,7 @@ from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError
 from core.config import config
 from core.duckmail_client import DuckMailClient
 from core.gptmail_client import GPTMailClient
+from core.moemail_client import MoeMailClient
 from core.gemini_automation import GeminiAutomation
 from core.gemini_automation_uc import GeminiAutomationUC
 
@@ -168,6 +169,29 @@ class RegisterService(BaseTaskService[RegisterTask]):
                 return {"success": False, "error": "GPTMail 生成失败"}
 
             log_cb("info", f"✅ GPTMail 邮箱生成成功: {client.email}")
+        elif provider == "moemail":
+            client = MoeMailClient(
+                base_url=config.basic.moemail_base_url,
+                api_key=config.basic.moemail_api_key,
+                proxy=config.basic.proxy_for_auth,
+                verify_ssl=config.basic.moemail_verify_ssl,
+                log_callback=log_cb,
+            )
+            if not config.basic.moemail_api_key:
+                log_cb("error", "❌ MoeMail API Key 未配置")
+                return {"success": False, "error": "MoeMail API Key 未配置"}
+
+            log_cb("info", "📧 步骤 1/3: 生成 MoeMail 邮箱...")
+            result = client.generate_email(
+                domain=domain or "",
+                prefix=config.basic.register_mail_prefix or "",
+            )
+            if not result:
+                log_cb("error", "❌ MoeMail 邮箱生成失败")
+                return {"success": False, "error": "MoeMail 生成失败"}
+            email_id, email_addr = result
+            client.set_credentials(email_addr, email_id)
+            log_cb("info", f"✅ MoeMail 邮箱生成成功: {client.email}")
         else:
             client = DuckMailClient(
                 base_url=config.basic.duckmail_base_url,
@@ -247,6 +271,11 @@ class RegisterService(BaseTaskService[RegisterTask]):
             config_data["mail_provider"] = "gptmail"
             config_data["mail_address"] = client.email
             config_data["mail_password"] = ""
+        elif provider == "moemail":
+            config_data["mail_provider"] = "moemail"
+            config_data["mail_address"] = client.email
+            config_data["mail_password"] = ""
+            config_data["mail_box_id"] = client.email_id
         else:
             config_data["mail_provider"] = "duckmail"
             config_data["mail_address"] = client.email
