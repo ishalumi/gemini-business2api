@@ -136,13 +136,24 @@ class MoeMailClient:
                 since_ms = int(since_time.timestamp() * 1000)
 
             for idx, msg in enumerate(messages[:10], 1):
-                sent_at = msg.get("sent_at") or msg.get("received_at")
+                msg_id = msg.get("id") or msg.get("messageId")
+                if not msg_id:
+                    continue
+
+                sent_at = msg.get("received_at") or msg.get("receivedAt") or msg.get("sent_at")
                 if since_ms and isinstance(sent_at, (int, float)) and sent_at < since_ms:
                     continue
 
-                self._log("info", f"🔍 正在解析邮件 {idx}/{len(messages)}")
-                html = msg.get("html") or ""
-                text = msg.get("content") or ""
+                self._log("info", f"🔍 正在读取邮件 {idx}/{len(messages)} (ID: {msg_id})")
+                detail = self._request("GET", f"{self.base_url}/api/emails/{self.email_id}/{msg_id}")
+                if detail.status_code != 200:
+                    self._log("warning", f"⚠️ 读取邮件详情失败: HTTP {detail.status_code}")
+                    continue
+                detail_payload = detail.json() if detail.content else {}
+                message = detail_payload.get("message") or detail_payload.get("data") or {}
+
+                html = message.get("html") or ""
+                text = message.get("content") or ""
                 content = html or text
                 if not content:
                     continue
