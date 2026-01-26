@@ -168,6 +168,13 @@
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
                   placeholder="mk_xxx"
                 />
+                <label class="block text-xs text-muted-foreground">MoeMail 邮箱域名</label>
+                <input
+                  v-model="localSettings.basic.moemail_domain"
+                  type="text"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="example.com"
+                />
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>注册邮箱服务商</span>
                   <HelpTip text="注册时使用的邮箱来源" />
@@ -503,6 +510,9 @@ watch(settings, (value) => {
     : ''
   next.basic.moemail_api_key = typeof next.basic.moemail_api_key === 'string'
     ? next.basic.moemail_api_key
+    : ''
+  next.basic.moemail_domain = typeof next.basic.moemail_domain === 'string'
+    ? next.basic.moemail_domain
     : ''
   next.basic.register_mail_provider = typeof next.basic.register_mail_provider === 'string'
     ? next.basic.register_mail_provider

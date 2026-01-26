@@ -1643,6 +1643,7 @@ async def admin_get_settings(request: Request):
             "gptmail_verify_ssl": config.basic.gptmail_verify_ssl,
             "moemail_base_url": config.basic.moemail_base_url,
             "moemail_api_key": config.basic.moemail_api_key,
+            "moemail_domain": config.basic.moemail_domain,
             "moemail_verify_ssl": config.basic.moemail_verify_ssl,
             "browser_engine": config.basic.browser_engine,
             "browser_headless": config.basic.browser_headless,
@@ -1710,6 +1711,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         basic.setdefault("gptmail_verify_ssl", config.basic.gptmail_verify_ssl)
         basic.setdefault("moemail_base_url", config.basic.moemail_base_url)
         basic.setdefault("moemail_api_key", config.basic.moemail_api_key)
+        basic.setdefault("moemail_domain", config.basic.moemail_domain)
         basic.setdefault("moemail_verify_ssl", config.basic.moemail_verify_ssl)
         basic.setdefault("browser_engine", config.basic.browser_engine)
         basic.setdefault("browser_headless", config.basic.browser_headless)

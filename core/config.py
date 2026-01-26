@@ -55,6 +55,7 @@ class BasicConfig(BaseModel):
     gptmail_verify_ssl: bool = Field(default=True, description="GPTMail SSL校验")
     moemail_base_url: str = Field(default="", description="MoeMail API地址")
     moemail_api_key: str = Field(default="", description="MoeMail API key")
+    moemail_domain: str = Field(default="", description="MoeMail 邮箱域名")
     moemail_verify_ssl: bool = Field(default=True, description="MoeMail SSL校验")
     browser_engine: str = Field(default="dp", description="浏览器引擎：uc 或 dp")
     browser_headless: bool = Field(default=False, description="自动化浏览器无头模式")
@@ -199,6 +200,7 @@ class ConfigManager:
         duckmail_api_key_raw = basic_data.get("duckmail_api_key", "")
         gptmail_api_key_raw = basic_data.get("gptmail_api_key", "")
         moemail_api_key_raw = basic_data.get("moemail_api_key", "")
+        moemail_domain_raw = basic_data.get("moemail_domain", "")
 
         # 兼容旧配置：如果存在旧的 proxy 字段，迁移到新字段
         old_proxy = basic_data.get("proxy", "")
@@ -233,6 +235,7 @@ class ConfigManager:
             gptmail_verify_ssl=_parse_bool(basic_data.get("gptmail_verify_ssl"), True),
             moemail_base_url=basic_data.get("moemail_base_url") or "",
             moemail_api_key=str(moemail_api_key_raw or "").strip(),
+            moemail_domain=str(moemail_domain_raw or "").strip(),
             moemail_verify_ssl=_parse_bool(basic_data.get("moemail_verify_ssl"), True),
             browser_engine=basic_data.get("browser_engine") or "dp",
             browser_headless=_parse_bool(basic_data.get("browser_headless"), False),

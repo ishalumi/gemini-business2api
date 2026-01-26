@@ -183,7 +183,7 @@ class RegisterService(BaseTaskService[RegisterTask]):
 
             log_cb("info", "📧 步骤 1/3: 生成 MoeMail 邮箱...")
             result = client.generate_email(
-                domain=domain or "",
+                domain=config.basic.moemail_domain or "",
                 prefix=config.basic.register_mail_prefix or "",
             )
             if not result:
