@@ -60,12 +60,11 @@ class RegisterService(BaseTaskService[RegisterTask]):
         """启动注册任务（支持排队）。"""
         async with self._lock:
             if os.environ.get("ACCOUNTS_CONFIG"):
-                raise ValueError("ACCOUNTS_CONFIG is set; register is disabled")
                 raise ValueError("已设置 ACCOUNTS_CONFIG 环境变量，注册功能已禁用")
-            if self._current_task_id:
-                current = self._tasks.get(self._current_task_id)
-                if current and current.status == TaskStatus.RUNNING:
-                    raise ValueError("已有注册任务正在运行中")
+
+            current = self.get_current_task()
+            if current and current.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                raise ValueError("已有注册任务正在运行中")
 
             domain_value = (domain or "").strip()
             if not domain_value:
@@ -78,9 +77,7 @@ class RegisterService(BaseTaskService[RegisterTask]):
             # 将 domain 记录在日志里，便于排查
             self._append_log(task, "info", f"register task queued (count={register_count}, domain={domain_value or 'default'})")
             await self._enqueue_task(task)
-            self._current_task_id = task.id
             self._append_log(task, "info", f"📝 创建注册任务 (数量={register_count})")
-            asyncio.create_task(self._run_register_async(task, domain_value))
             return task
 
     def _execute_task(self, task: RegisterTask):
@@ -124,7 +121,6 @@ class RegisterService(BaseTaskService[RegisterTask]):
         else:
             task.status = TaskStatus.SUCCESS if task.fail_count == 0 else TaskStatus.FAILED
         task.finished_at = time.time()
-        self._current_task_id = None
         self._append_log(task, "info", f"🏁 注册任务完成 (成功: {task.success_count}, 失败: {task.fail_count}, 总计: {task.count})")
 
     def _register_one(self, domain: Optional[str], task: RegisterTask) -> dict:
