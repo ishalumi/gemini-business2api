@@ -1,6 +1,6 @@
 services:
   gemini-api:
-    image: ghcr.io/ishalumi/gemini-business2api:latest
+    build: .
     container_name: gemini-business2api
     ports:
       - "7860:7860"
