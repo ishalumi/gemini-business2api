@@ -476,6 +476,10 @@ class _ConfigProxy:
         return config_manager.config.retry
 
     @property
+    def automation(self):
+        return config_manager.config.automation
+
+    @property
     def public_display(self):
         return config_manager.config.public_display
 

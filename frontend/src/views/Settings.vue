@@ -4,6 +4,17 @@
       正在加载设置...
     </section>
 
+    <section v-else-if="loadError" class="rounded-3xl border border-destructive bg-destructive/10 p-6">
+      <p class="text-base font-semibold text-destructive">加载设置失败</p>
+      <p class="mt-2 text-sm text-destructive/80">{{ loadError }}</p>
+      <button
+        class="mt-4 rounded-full bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90"
+        @click="settingsStore.loadSettings()"
+      >
+        重试
+      </button>
+    </section>
+
     <section v-else class="rounded-3xl border border-border bg-card p-6">
       <div class="flex items-center justify-between">
         <p class="text-base font-semibold text-foreground">配置面板</p>
@@ -348,7 +359,7 @@ import HelpTip from '@/components/ui/HelpTip.vue'
 import type { Settings } from '@/types/api'
 
 const settingsStore = useSettingsStore()
-const { settings, isLoading } = storeToRefs(settingsStore)
+const { settings, isLoading, loadError } = storeToRefs(settingsStore)
 const toast = useToast()
 
 const localSettings = ref<Settings | null>(null)
