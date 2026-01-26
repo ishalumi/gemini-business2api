@@ -1,4 +1,4 @@
-import json, time, os, sys, asyncio, uuid, ssl, re, yaml, shutil, base64
+import json, time, os, asyncio, uuid, ssl, re, yaml, shutil, base64
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Union, Dict, Any
 from pathlib import Path
@@ -15,11 +15,6 @@ from pydantic import BaseModel
 from util.streaming_parser import parse_json_array_stream_async
 from collections import deque
 from threading import Lock
-
-try:
-    import resource
-except Exception:
-    resource = None
 
 # ---------- 数据目录配置 ----------
 # 自动检测环境：HF Spaces Pro 使用 /data，本地使用 ./data
@@ -103,84 +98,8 @@ log_lock = Lock()
 security_log_buffer = deque(maxlen=1000)
 security_log_lock = Lock()
 
-# ---------- 性能采样配置 ----------
-PERF_SAMPLE_INTERVAL_SECONDS = float(os.getenv("PERF_SAMPLE_INTERVAL_SECONDS", "60"))
-PERF_HISTORY_HOURS = float(os.getenv("PERF_HISTORY_HOURS", "24"))
-PERF_SAMPLE_INTERVAL_SECONDS = max(1.0, PERF_SAMPLE_INTERVAL_SECONDS)
-PERF_MAX_SAMPLES = int((PERF_HISTORY_HOURS * 3600) / PERF_SAMPLE_INTERVAL_SECONDS) if PERF_HISTORY_HOURS > 0 else 1440
-PERF_MAX_SAMPLES = max(1, PERF_MAX_SAMPLES)
-performance_samples = deque(maxlen=PERF_MAX_SAMPLES)
-performance_lock = Lock()
-_perf_last_wall_time: Optional[float] = None
-_perf_last_cpu_time: Optional[float] = None
-
 # 统计数据持久化
 stats_lock = asyncio.Lock()  # 改为异步锁
-
-def _get_rss_bytes() -> Optional[int]:
-    """获取当前进程 RSS（字节），失败返回 None。"""
-    try:
-        if os.path.exists("/proc/self/statm"):
-            with open("/proc/self/statm", "r", encoding="utf-8") as f:
-                parts = f.read().strip().split()
-                if len(parts) >= 2:
-                    rss_pages = int(parts[1])
-                    return rss_pages * os.sysconf("SC_PAGE_SIZE")
-    except Exception:
-        pass
-
-    if resource:
-        try:
-            rss_kb_or_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-            if rss_kb_or_bytes:
-                if sys.platform == "darwin":
-                    return int(rss_kb_or_bytes)
-                return int(rss_kb_or_bytes) * 1024
-        except Exception:
-            pass
-    return None
-
-
-async def performance_sampler():
-    """采集进程性能指标（CPU% / 内存MB）。"""
-    global _perf_last_wall_time, _perf_last_cpu_time
-    cpu_count = max(1, os.cpu_count() or 1)
-    expected_next = time.time()
-
-    while True:
-        now = time.time()
-        cpu_time_now = time.process_time()
-
-        cpu_percent = None
-        if _perf_last_wall_time is not None and _perf_last_cpu_time is not None:
-            wall_delta = now - _perf_last_wall_time
-            cpu_delta = cpu_time_now - _perf_last_cpu_time
-            if wall_delta > 0:
-                cpu_percent = (cpu_delta / wall_delta) * 100 / cpu_count
-                cpu_percent = max(0.0, min(100.0, cpu_percent))
-
-        rss_bytes = _get_rss_bytes()
-        memory_mb = None
-        if rss_bytes is not None:
-            memory_mb = round(rss_bytes / (1024 * 1024), 2)
-
-        lag_ms = max(0.0, (now - expected_next)) * 1000 if expected_next else 0.0
-        expected_next = now + PERF_SAMPLE_INTERVAL_SECONDS
-
-        sample = {
-            "time": datetime.now(timezone(timedelta(hours=8))).strftime("%m-%d %H:%M"),
-            "cpu_percent": cpu_percent,
-            "memory_mb": memory_mb,
-            "loop_lag_ms": round(lag_ms, 2),
-        }
-
-        with performance_lock:
-            performance_samples.append(sample)
-
-        _perf_last_wall_time = now
-        _perf_last_cpu_time = cpu_time_now
-
-        await asyncio.sleep(PERF_SAMPLE_INTERVAL_SECONDS)
 
 async def load_stats():
     """加载统计数据（异步）。"""
@@ -1006,11 +925,6 @@ async def startup_event():
     uptime_tracker.load_heartbeats()
     logger.info(f"[SYSTEM] 统计数据已加载: {global_stats['total_requests']} 次请求, {global_stats['total_visitors']} 位访客")
 
-    # 启动性能采样任务
-    if PERF_SAMPLE_INTERVAL_SECONDS > 0:
-        asyncio.create_task(performance_sampler())
-        logger.info(f"[SYSTEM] 性能采样任务已启动（间隔: {PERF_SAMPLE_INTERVAL_SECONDS:.0f}秒）")
-
     # 启动缓存清理任务
     asyncio.create_task(multi_account_mgr.start_background_cleanup())
     logger.info("[SYSTEM] 后台缓存清理任务已启动（间隔: 5分钟）")
@@ -1399,13 +1313,6 @@ async def admin_stats(request: Request):
             if model not in model_requests:
                 model_requests[model] = bucketize(timestamps)
 
-    with performance_lock:
-        perf_samples = list(performance_samples)
-
-    perf_labels = [item.get("time", "") for item in perf_samples]
-    perf_cpu = [item.get("cpu_percent") for item in perf_samples]
-    perf_mem = [item.get("memory_mb") for item in perf_samples]
-
     return {
         "total_accounts": total_accounts,
         "active_accounts": active_accounts,
@@ -1418,11 +1325,6 @@ async def admin_stats(request: Request):
             "failed_requests": bucketize(failure_timestamps),
             "rate_limited_requests": bucketize(rate_limit_timestamps),
             "model_requests": model_requests,
-        },
-        "performance": {
-            "labels": perf_labels,
-            "cpu_percent": perf_cpu,
-            "memory_mb": perf_mem,
         }
     }
 
