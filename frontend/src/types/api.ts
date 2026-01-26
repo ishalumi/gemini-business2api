@@ -200,6 +200,12 @@ export interface AdminStatsTrend {
   model_requests?: Record<string, number[]>
 }
 
+export interface AdminPerformanceTrend {
+  labels: string[]
+  cpu_percent: Array<number | null>
+  memory_mb: Array<number | null>
+}
+
 export interface AdminStats {
   total_accounts: number
   active_accounts: number
@@ -207,6 +213,7 @@ export interface AdminStats {
   rate_limited_accounts: number
   idle_accounts: number
   trend: AdminStatsTrend
+  performance?: AdminPerformanceTrend
 }
 
 export interface PublicStats {

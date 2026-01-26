@@ -22,6 +22,10 @@
           <p class="text-sm font-medium text-foreground">模型调用分布（近12小时）</p>
           <div ref="modelChartRef" class="mt-4 h-80 w-full max-w-full lg:h-64"></div>
         </div>
+        <div class="mt-6 border-t border-border pt-4">
+          <p class="text-sm font-medium text-foreground">性能趋势（近24小时）</p>
+          <div ref="performanceChartRef" class="mt-4 h-64 w-full max-w-full lg:h-72"></div>
+        </div>
       </div>
 
       <div class="dashboard-side w-full min-w-0 rounded-3xl border border-border bg-card p-6">
@@ -71,11 +75,16 @@ const trendFailureData = ref<number[]>([])
 const trendSuccessData = ref<number[]>([])
 const trendLabels = ref<string[]>([])
 const trendModelRequests = ref<Record<string, number[]>>({})
+const perfLabels = ref<string[]>([])
+const perfCpu = ref<Array<number | null>>([])
+const perfMem = ref<Array<number | null>>([])
 
 const trendChartRef = ref<HTMLDivElement | null>(null)
 const modelChartRef = ref<HTMLDivElement | null>(null)
+const performanceChartRef = ref<HTMLDivElement | null>(null)
 let trendChart: ChartInstance | null = null
 let modelChart: ChartInstance | null = null
+let performanceChart: ChartInstance | null = null
 
 const accountBreakdown = computed(() => {
   const total = Math.max(Number(stats.value[0].value), 1)
@@ -117,6 +126,7 @@ onMounted(async () => {
   await loadOverview()
   initTrendChart()
   initModelChart()
+  initPerformanceChart()
   window.addEventListener('resize', handleResize)
 })
 
@@ -129,6 +139,10 @@ onBeforeUnmount(() => {
   if (modelChart) {
     modelChart.dispose()
     modelChart = null
+  }
+  if (performanceChart) {
+    performanceChart.dispose()
+    performanceChart = null
   }
 })
 
@@ -148,6 +162,15 @@ function initModelChart() {
   modelChart = echarts.init(modelChartRef.value)
   updateModelChart()
   scheduleModelResize()
+}
+
+function initPerformanceChart() {
+  const echarts = (window as any).echarts as { init: (el: HTMLElement) => ChartInstance } | undefined
+  if (!echarts || !performanceChartRef.value) return
+
+  performanceChart = echarts.init(performanceChartRef.value)
+  updatePerformanceChart()
+  schedulePerformanceResize()
 }
 
 function updateTrendChart() {
@@ -274,6 +297,74 @@ function updateModelChart() {
   scheduleModelResize()
 }
 
+function updatePerformanceChart() {
+  if (!performanceChart) return
+
+  performanceChart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: {
+      data: ['CPU%', '内存(MB)'],
+      right: 0,
+      top: 0,
+      textStyle: { color: '#6b6b6b', fontSize: 11 },
+    },
+    grid: { left: 24, right: 24, top: 44, bottom: 24, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: perfLabels.value,
+      boundaryGap: false,
+      axisLine: { lineStyle: { color: '#d4d4d4' } },
+      axisTick: { show: false },
+      axisLabel: { color: '#6b6b6b', fontSize: 10 },
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: 'CPU%',
+        min: 0,
+        max: 100,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: '#6b6b6b', fontSize: 10 },
+        splitLine: { lineStyle: { color: '#e5e5e5' } },
+      },
+      {
+        type: 'value',
+        name: '内存(MB)',
+        position: 'right',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: '#6b6b6b', fontSize: 10 },
+        splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: 'CPU%',
+        type: 'line',
+        data: perfCpu.value,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        itemStyle: { color: '#10b981' },
+        emphasis: { disabled: true },
+      },
+      {
+        name: '内存(MB)',
+        type: 'line',
+        data: perfMem.value,
+        yAxisIndex: 1,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        itemStyle: { color: '#6366f1' },
+        emphasis: { disabled: true },
+      },
+    ],
+  })
+  schedulePerformanceResize()
+}
+
 function handleResize() {
   if (trendChart) {
     trendChart.resize()
@@ -281,6 +372,9 @@ function handleResize() {
   if (modelChart) {
     // 重新渲染图表以应用响应式布局
     updateModelChart()
+  }
+  if (performanceChart) {
+    performanceChart.resize()
   }
 }
 
@@ -304,6 +398,12 @@ async function loadOverview() {
 
     updateTrendChart()
     updateModelChart()
+
+    const performance = overview.performance || { labels: [], cpu_percent: [], memory_mb: [] }
+    perfLabels.value = performance.labels || []
+    perfCpu.value = performance.cpu_percent || []
+    perfMem.value = performance.memory_mb || []
+    updatePerformanceChart()
   } catch (error) {
     console.error('Failed to load overview:', error)
   }
@@ -320,6 +420,13 @@ function scheduleModelResize() {
   if (!modelChart) return
   requestAnimationFrame(() => {
     modelChart?.resize()
+  })
+}
+
+function schedulePerformanceResize() {
+  if (!performanceChart) return
+  requestAnimationFrame(() => {
+    performanceChart?.resize()
   })
 }
 
