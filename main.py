@@ -45,7 +45,6 @@ from core.session_auth import is_logged_in, login_user, logout_user, require_log
 
 # 导入核心模块
 from core.message import (
-    get_conversation_key,
     parse_last_message,
     build_full_context_text
 )
@@ -1699,13 +1698,6 @@ async def chat_impl(
         return "error"
 
 
-    # 获取客户端IP（用于会话隔离）
-    client_ip = request.headers.get("x-forwarded-for")
-    if client_ip:
-        client_ip = client_ip.split(",")[0].strip()
-    else:
-        client_ip = request.client.host if request.client else "unknown"
-
     # 记录请求统计
     async with stats_lock:
         timestamp = time.time()
@@ -1729,56 +1721,41 @@ async def chat_impl(
     # 保存模型信息到 request.state（用于 Uptime 追踪）
     request.state.model = req.model
 
-    # 3. 生成会话指纹，获取Session锁（防止同一对话的并发请求冲突）
-    conv_key = get_conversation_key([m.model_dump() for m in req.messages], client_ip)
-    session_lock = await multi_account_mgr.acquire_session_lock(conv_key)
+    # 3. 每次请求都创建全新 Session（不复用、不缓存、不加“同对话”锁）
+    # 你的网关层会把不同来源的请求统一转发到这里，IP 可能完全一致；
+    # 如果继续做“基于IP/消息的会话复用”，会导致不同请求共享 Session，出现互相掐断/串话。
+    max_account_tries = min(MAX_NEW_SESSION_TRIES, len(multi_account_mgr.accounts))
+    last_error: Optional[Exception] = None
+    is_new_conversation = True
+    google_session = None
 
-    # 4. 在锁的保护下检查缓存和处理Session（保证同一对话的请求串行化）
-    async with session_lock:
-        cached_session = multi_account_mgr.global_session_cache.get(conv_key)
+    for attempt in range(max_account_tries):
+        try:
+            account_manager = await multi_account_mgr.get_account(None, request_id)
+            google_session = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
+            logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 新会话创建（每请求新Session）")
+            uptime_tracker.record_request("account_pool", True)
+            break
+        except Exception as e:
+            last_error = e if isinstance(e, Exception) else Exception(str(e))
+            error_type = type(e).__name__
+            account_id = account_manager.config.account_id if 'account_manager' in locals() and account_manager else 'unknown'
+            logger.error(
+                f"[CHAT] [req_{request_id}] 账户 {account_id} 创建会话失败 "
+                f"(尝试 {attempt + 1}/{max_account_tries}) - {error_type}: {str(e)}"
+            )
+            status_code = e.status_code if isinstance(e, HTTPException) else None
+            uptime_tracker.record_request("account_pool", False, status_code=status_code)
+            if attempt == max_account_tries - 1:
+                logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用")
+                status = classify_error_status(503, last_error)
+                await finalize_result(status, 503, f"All accounts unavailable: {str(last_error)[:100]}")
+                raise HTTPException(503, f"All accounts unavailable: {str(last_error)[:100]}")
 
-        if cached_session:
-            # 使用已绑定的账户
-            account_id = cached_session["account_id"]
-            account_manager = await multi_account_mgr.get_account(account_id, request_id)
-            google_session = cached_session["session_id"]
-            is_new_conversation = False
-            logger.info(f"[CHAT] [{account_id}] [req_{request_id}] 继续会话: {google_session[-12:]}")
-        else:
-            # 新对话：轮询选择可用账户，失败时尝试其他账户
-            max_account_tries = min(MAX_NEW_SESSION_TRIES, len(multi_account_mgr.accounts))
-            last_error = None
-
-            for attempt in range(max_account_tries):
-                try:
-                    account_manager = await multi_account_mgr.get_account(None, request_id)
-                    google_session = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
-                    # 线程安全地绑定账户到此对话
-                    await multi_account_mgr.set_session_cache(
-                        conv_key,
-                        account_manager.config.account_id,
-                        google_session
-                    )
-                    is_new_conversation = True
-                    logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 新会话创建并绑定账户")
-                    # 记录账号池状态（账户可用）
-                    uptime_tracker.record_request("account_pool", True)
-                    break
-                except Exception as e:
-                    last_error = e
-                    error_type = type(e).__name__
-                    # 安全获取账户ID
-                    account_id = account_manager.config.account_id if 'account_manager' in locals() and account_manager else 'unknown'
-                    logger.error(f"[CHAT] [req_{request_id}] 账户 {account_id} 创建会话失败 (尝试 {attempt + 1}/{max_account_tries}) - {error_type}: {str(e)}")
-                    # 记录账号池状态（单个账户失败）
-                    status_code = e.status_code if isinstance(e, HTTPException) else None
-                    uptime_tracker.record_request("account_pool", False, status_code=status_code)
-                    if attempt == max_account_tries - 1:
-                        logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用")
-                        status = classify_error_status(503, last_error if isinstance(last_error, Exception) else Exception("account_pool_unavailable"))
-                        await finalize_result(status, 503, f"All accounts unavailable: {str(last_error)[:100]}")
-                        raise HTTPException(503, f"All accounts unavailable: {str(last_error)[:100]}")
-                    # 继续尝试下一个账户
+    if not google_session:
+        # 理论上不会走到这里（上面会 raise），但为防御性编程保底
+        await finalize_result("error", 503, "No session created")
+        raise HTTPException(503, "No session created")
 
     # 提取用户消息内容用于日志
     if req.messages:
@@ -1813,16 +1790,9 @@ async def chat_impl(
         raise
 
     # 4. 准备文本内容
-    if is_new_conversation:
-        # 新对话只发送最后一条
-        text_to_send = last_text
-        is_retry_mode = True
-    else:
-        # 继续对话只发送当前消息
-        text_to_send = last_text
-        is_retry_mode = False
-        # 线程安全地更新时间戳
-        await multi_account_mgr.update_session_time(conv_key)
+    # 每次请求都是新 Session：必须把上下文一起发出去（由结构/特殊token实现伪Role与记忆）
+    text_to_send = last_text
+    is_retry_mode = True
 
     chat_id = f"chatcmpl-{uuid.uuid4()}"
     created_time = int(time.time())
@@ -1843,24 +1813,17 @@ async def chat_impl(
         # 记录已失败的账户，避免重复使用
         failed_accounts = set()
 
+        # 本次请求的 Session（不复用缓存）
+        current_session = google_session
+
         # 重试逻辑：最多尝试 max_retries+1 次（初次+重试）
         while retry_count <= max_retries:
             try:
-                # 安全：使用.get()防止缓存被清理导致KeyError
-                cached = multi_account_mgr.global_session_cache.get(conv_key)
-                if not cached:
-                    logger.warning(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 缓存已清理，重建Session")
-                    new_sess = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
-                    await multi_account_mgr.set_session_cache(
-                        conv_key,
-                        account_manager.config.account_id,
-                        new_sess
-                    )
-                    current_session = new_sess
+                if not current_session:
+                    logger.warning(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] Session为空，重建Session")
+                    current_session = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
                     current_retry_mode = True
                     current_file_ids = []
-                else:
-                    current_session = cached["session_id"]
 
                 # A. 如果有图片且还没上传到当前 Session，先上传
                 # 注意：每次重试如果是新 Session，都需要重新上传图片
@@ -1974,15 +1937,9 @@ async def chat_impl(
 
                         logger.info(f"[CHAT] [req_{request_id}] 切换账户: {account_manager.config.account_id} -> {new_account.config.account_id}")
 
-                        # 创建新 Session
+                        # 创建新 Session（每请求不复用缓存）
                         new_sess = await create_google_session(new_account, http_client, USER_AGENT, request_id)
-
-                        # 更新缓存绑定到新账户
-                        await multi_account_mgr.set_session_cache(
-                            conv_key,
-                            new_account.config.account_id,
-                            new_sess
-                        )
+                        current_session = new_sess
 
                         # 更新账户管理器
                         account_manager = new_account
@@ -2013,7 +1970,12 @@ async def chat_impl(
                     return
 
     if req.stream:
-        return StreamingResponse(response_wrapper(), media_type="text/event-stream")
+        # 关闭缓存/代理缓冲，降低“长时间无输出导致客户端/代理断开”的概率
+        headers = {
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+        return StreamingResponse(response_wrapper(), media_type="text/event-stream", headers=headers)
     
     full_content = ""
     full_reasoning = ""
@@ -2146,42 +2108,108 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
     json_objects = []  # 收集所有响应对象用于图片解析
     file_ids_info = None  # 保存图片信息
 
+    # 生图/思维链等阶段可能会出现“上游长时间无输出”，这里通过：
+    # 1) 禁用 read timeout（避免 httpx 自己掐断）
+    # 2) 在下游 SSE 定期发送心跳（避免客户端/代理超时断开）
+    heartbeat_interval_seconds = 8.0
+    last_yield_ts = time.time()
+    heartbeat_chunk = None
+    if is_stream:
+        # 发送一个“空内容”chunk 作为心跳：保持 OpenAI SSE 格式，不污染输出
+        heartbeat_chunk = create_chunk(chat_id, created_time, model_name, {"content": ""}, None)
+
     async with http_client.stream(
         "POST",
         "https://biz-discoveryengine.googleapis.com/v1alpha/locations/global/widgetStreamAssist",
         headers=headers,
         json=body,
+        timeout=httpx.Timeout(None, connect=60.0),
     ) as r:
         if r.status_code != 200:
             error_text = await r.aread()
             uptime_tracker.record_request(model_name, False, status_code=r.status_code)
             raise HTTPException(status_code=r.status_code, detail=f"Upstream Error {error_text.decode()}")
 
-        # 使用异步解析器处理 JSON 数组流
+        # 使用异步解析器处理 JSON 数组流（加入心跳：上游无输出时也能向客户端持续回包）
         try:
-            async for json_obj in parse_json_array_stream_async(r.aiter_lines()):
-                json_objects.append(json_obj)  # 收集响应
+            queue: asyncio.Queue = asyncio.Queue()
+            done_event = asyncio.Event()
+            reader_exc: Optional[BaseException] = None
 
-                # 提取文本内容
-                for reply in json_obj.get("streamAssistResponse", {}).get("answer", {}).get("replies", []):
-                    content_obj = reply.get("groundedContent", {}).get("content", {})
-                    text = content_obj.get("text", "")
+            async def reader() -> None:
+                nonlocal reader_exc
+                try:
+                    async for json_obj in parse_json_array_stream_async(r.aiter_lines()):
+                        await queue.put(json_obj)
+                except BaseException as exc:
+                    reader_exc = exc
+                finally:
+                    done_event.set()
 
-                    if not text:
+            reader_task = asyncio.create_task(reader())
+
+            try:
+                while True:
+                    # 客户端已断开：尽快结束，避免无意义占用连接
+                    if request is not None and await request.is_disconnected():
+                        logger.warning(f"[API] [{account_manager.config.account_id}] [req_{request_id}] 客户端断开，终止流式输出")
+                        break
+
+                    try:
+                        json_obj = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval_seconds)
+                    except asyncio.TimeoutError:
+                        # 上游在一段时间内没有任何输出：发送心跳保持连接
+                        if is_stream and heartbeat_chunk and (time.time() - last_yield_ts) >= heartbeat_interval_seconds:
+                            yield f"data: {heartbeat_chunk}\n\n"
+                            last_yield_ts = time.time()
+
+                        # 若已结束且队列为空，退出
+                        if done_event.is_set() and queue.empty():
+                            break
                         continue
 
-                    # 区分思考过程和正常内容
-                    if content_obj.get("thought"):
-                        # 思考过程使用 reasoning_content 字段（类似 OpenAI o1）
-                        chunk = create_chunk(chat_id, created_time, model_name, {"reasoning_content": text}, None)
-                        yield f"data: {chunk}\n\n"
-                    else:
-                        if first_response_time is None:
-                            first_response_time = time.time()
-                        # 正常内容使用 content 字段
-                        full_content += text
-                        chunk = create_chunk(chat_id, created_time, model_name, {"content": text}, None)
-                        yield f"data: {chunk}\n\n"
+                    if reader_exc is not None:
+                        raise reader_exc
+
+                    # 正常处理一个响应对象
+                    json_objects.append(json_obj)  # 收集响应
+
+                    # 提取文本内容
+                    for reply in json_obj.get("streamAssistResponse", {}).get("answer", {}).get("replies", []):
+                        content_obj = reply.get("groundedContent", {}).get("content", {})
+                        text = content_obj.get("text", "")
+
+                        if not text:
+                            continue
+
+                        # 区分思考过程和正常内容
+                        if content_obj.get("thought"):
+                            # 思考过程使用 reasoning_content 字段（类似 OpenAI o1）
+                            chunk = create_chunk(chat_id, created_time, model_name, {"reasoning_content": text}, None)
+                            yield f"data: {chunk}\n\n"
+                            last_yield_ts = time.time()
+                        else:
+                            if first_response_time is None:
+                                first_response_time = time.time()
+                            # 正常内容使用 content 字段
+                            full_content += text
+                            chunk = create_chunk(chat_id, created_time, model_name, {"content": text}, None)
+                            yield f"data: {chunk}\n\n"
+                            last_yield_ts = time.time()
+
+                    if done_event.is_set() and queue.empty():
+                        break
+
+                if reader_exc is not None:
+                    raise reader_exc
+
+            finally:
+                if not reader_task.done():
+                    reader_task.cancel()
+                    try:
+                        await reader_task
+                    except BaseException:
+                        pass
 
             # 提取图片信息（在 async with 块内）
             if json_objects:
