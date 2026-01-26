@@ -191,14 +191,6 @@
             >
               状态监控
             </RouterLink>
-            <RouterLink
-              to="/public/logs"
-              target="_blank"
-              class="rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors
-                     hover:border-primary hover:text-primary"
-            >
-              公开日志
-            </RouterLink>
           </div>
         </header>
 

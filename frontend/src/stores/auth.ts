@@ -10,10 +10,10 @@ export const useAuthStore = defineStore('auth', () => {
   let checkPromise: Promise<boolean> | null = null
 
   // 登录
-  async function login(password: string) {
+  async function login(username: string, password: string) {
     isLoading.value = true
     try {
-      await authApi.login({ password })
+      await authApi.login({ username, password })
       await authApi.checkAuth()
       isLoggedIn.value = true
       lastCheckedAt.value = Date.now()

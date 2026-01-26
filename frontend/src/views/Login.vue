@@ -9,6 +9,22 @@
 
         <form @submit.prevent="handleLogin" class="mt-8 space-y-6">
           <div class="space-y-2">
+            <label for="username" class="block text-sm font-medium text-foreground">
+              用户名
+            </label>
+            <input
+              id="username"
+              v-model="username"
+              type="text"
+              required
+              class="w-full rounded-2xl border border-input bg-background px-4 py-3 text-sm
+                     focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent
+                     transition-all"
+              placeholder="请输入管理员用户名"
+              :disabled="isLoading"
+            />
+          </div>
+          <div class="space-y-2">
             <label for="password" class="block text-sm font-medium text-foreground">
               管理员密钥
             </label>
@@ -35,7 +51,7 @@
 
           <button
             type="submit"
-            :disabled="isLoading || !password || !agreedToDisclaimer"
+            :disabled="isLoading || !username || !password || !agreedToDisclaimer"
             class="w-full rounded-2xl bg-primary py-3 text-sm font-medium text-primary-foreground
                    transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -174,6 +190,7 @@ import Checkbox from '@/components/ui/Checkbox.vue'
 const router = useRouter()
 const authStore = useAuthStore()
 
+const username = ref('')
 const password = ref('')
 const errorMessage = ref('')
 const isLoading = ref(false)
@@ -187,13 +204,13 @@ function handleCheckboxChange(checked: boolean) {
 }
 
 async function handleLogin() {
-  if (!password.value || !agreedToDisclaimer.value) return
+  if (!username.value || !password.value || !agreedToDisclaimer.value) return
 
   errorMessage.value = ''
   isLoading.value = true
 
   try {
-    await authStore.login(password.value)
+    await authStore.login(username.value, password.value)
     router.push({ name: 'dashboard' })
   } catch (error: any) {
     errorMessage.value = error.message || '登录失败，请检查密钥。'

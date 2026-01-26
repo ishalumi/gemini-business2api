@@ -223,6 +223,7 @@ export interface UptimeResponse {
 }
 
 export interface LoginRequest {
+  username: string
   password: string
 }
 

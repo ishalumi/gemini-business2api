@@ -103,6 +103,7 @@ class SessionConfig(BaseModel):
 
 class SecurityConfig(BaseModel):
     """安全配置（仅从环境变量读取，不可热更新）"""
+    admin_username: str = Field(default="admin", description="管理员用户名（必需）")
     admin_key: str = Field(default="", description="管理员密钥（必需）")
     session_secret_key: str = Field(..., description="Session密钥")
 
@@ -150,6 +151,7 @@ class ConfigManager:
 
         # 2. 加载安全配置（仅从环境变量，不允许 Web 修改）
         security_config = SecurityConfig(
+            admin_username=os.getenv("ADMIN_USERNAME", "admin"),
             admin_key=os.getenv("ADMIN_KEY", ""),
             session_secret_key=os.getenv("SESSION_SECRET_KEY", self._generate_secret())
         )

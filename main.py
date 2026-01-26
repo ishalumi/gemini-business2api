@@ -286,12 +286,14 @@ logger.addHandler(memory_handler)
 # 所有配置通过 config_manager 访问，优先级：环境变量 > YAML > 默认值
 TIMEOUT_SECONDS = 600
 API_KEY = config.basic.api_key
+ADMIN_USERNAME = config.security.admin_username
 ADMIN_KEY = config.security.admin_key
 PROXY_FOR_AUTH = config.basic.proxy_for_auth
 PROXY_FOR_CHAT = config.basic.proxy_for_chat
 BASE_URL = config.basic.base_url
 SESSION_SECRET_KEY = config.security.session_secret_key
 SESSION_EXPIRE_HOURS = config.session.expire_hours
+PATH_PREFIX = os.getenv("PATH_PREFIX", "").strip().strip("/")
 
 # ---------- 公开展示配置 ----------
 LOGO_URL = config.public_display.logo_url
@@ -470,7 +472,7 @@ if not ADMIN_KEY:
 # 启动日志
 logger.info("[SYSTEM] API端点: /v1/chat/completions")
 logger.info("[SYSTEM] Admin API endpoints: /admin/*")
-logger.info("[SYSTEM] Public endpoints: /public/log, /public/stats, /public/uptime")
+logger.info("[SYSTEM] Public endpoints: /public/stats, /public/uptime")
 logger.info(f"[SYSTEM] Session过期时间: {SESSION_EXPIRE_HOURS}小时")
 logger.info("[SYSTEM] 系统初始化完成")
 
@@ -575,6 +577,145 @@ app.add_middleware(
     same_site="lax",
     https_only=False  # 本地开发可设为False，生产环境建议True
 )
+
+# ---------- 安全防护：路径扫描/爆破封禁 ----------
+# 注意：new-api 作为网关转发时，务必尽量透传真实客户端 IP（X-Forwarded-For / X-Real-IP）。
+SECURITY_ENABLED = os.getenv("SECURITY_ENABLED", "1") == "1"
+SECURITY_TRUST_PROXY_HEADERS = os.getenv("SECURITY_TRUST_PROXY_HEADERS", "1") == "1"
+SECURITY_TEMP_BAN_SECONDS = int(os.getenv("SECURITY_TEMP_BAN_SECONDS", "900"))  # 15min
+SECURITY_MAX_TEMP_BANS_BEFORE_PERM = int(os.getenv("SECURITY_MAX_TEMP_BANS_BEFORE_PERM", "3"))
+SECURITY_404_THRESHOLD = int(os.getenv("SECURITY_404_THRESHOLD", "30"))  # window 内 404 次数
+SECURITY_404_WINDOW_SECONDS = int(os.getenv("SECURITY_404_WINDOW_SECONDS", "60"))
+SECURITY_LOGIN_FAIL_THRESHOLD = int(os.getenv("SECURITY_LOGIN_FAIL_THRESHOLD", "8"))
+SECURITY_LOGIN_FAIL_WINDOW_SECONDS = int(os.getenv("SECURITY_LOGIN_FAIL_WINDOW_SECONDS", "300"))
+
+_security_lock = asyncio.Lock()
+_security_404_hits: Dict[str, deque] = {}
+_security_login_fail_hits: Dict[str, deque] = {}
+_security_temp_bans: Dict[str, Dict[str, Any]] = {}
+_security_temp_ban_counts: Dict[str, int] = {}
+_security_perm_bans: Dict[str, float] = {}  # ip -> banned_at
+
+
+def get_client_ip_for_security(request: Request) -> str:
+    """获取用于安全策略的客户端 IP（优先信任代理头）。"""
+    if SECURITY_TRUST_PROXY_HEADERS:
+        xff = (request.headers.get("x-forwarded-for") or "").strip()
+        if xff:
+            return xff.split(",")[0].strip()
+        xri = (request.headers.get("x-real-ip") or "").strip()
+        if xri:
+            return xri
+    return request.client.host if request.client else "unknown"
+
+
+def _security_is_ignorable_404_path(path: str) -> bool:
+    # 避免把常见静态资源缺失当成扫描攻击
+    if path in ("/favicon.ico", "/robots.txt", "/sitemap.xml"):
+        return True
+    if path == "/public/log":
+        return True
+    if path.startswith(("/static/", "/assets/", "/vendor/", "/images/", "/videos/")):
+        return True
+    return False
+
+
+async def _security_ban_temp(ip: str, reason: str) -> None:
+    now = time.time()
+    count = int(_security_temp_ban_counts.get(ip, 0)) + 1
+    _security_temp_ban_counts[ip] = count
+
+    if count >= SECURITY_MAX_TEMP_BANS_BEFORE_PERM:
+        _security_perm_bans[ip] = now
+        _security_temp_bans.pop(ip, None)
+        logger.warning(f"[SECURITY] IP 永久封禁: {ip} (reason={reason}, temp_bans={count})")
+        return
+
+    _security_temp_bans[ip] = {
+        "until": now + SECURITY_TEMP_BAN_SECONDS,
+        "reason": reason,
+        "banned_at": now,
+        "count": count,
+    }
+    logger.warning(f"[SECURITY] IP 暂时封禁: {ip} {SECURITY_TEMP_BAN_SECONDS}s (reason={reason}, temp_bans={count})")
+
+
+async def _security_check_ban(ip: str) -> Optional[Response]:
+    now = time.time()
+    if ip in _security_perm_bans:
+        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+
+    ban = _security_temp_bans.get(ip)
+    if not ban:
+        return None
+
+    until = float(ban.get("until") or 0)
+    if until <= now:
+        _security_temp_bans.pop(ip, None)
+        return None
+
+    retry_after = max(1, int(until - now))
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too Many Requests", "retry_after": retry_after},
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+async def _security_record_404(ip: str) -> None:
+    dq = _security_404_hits.get(ip)
+    if dq is None:
+        dq = deque()
+        _security_404_hits[ip] = dq
+    dq.append(time.time())
+    # 窗口修剪
+    while dq and (time.time() - dq[0]) > SECURITY_404_WINDOW_SECONDS:
+        dq.popleft()
+    if len(dq) >= SECURITY_404_THRESHOLD:
+        await _security_ban_temp(ip, reason="path_scan")
+        _security_404_hits.pop(ip, None)
+
+
+async def _security_record_login_failure(ip: str) -> None:
+    dq = _security_login_fail_hits.get(ip)
+    if dq is None:
+        dq = deque()
+        _security_login_fail_hits[ip] = dq
+    dq.append(time.time())
+    while dq and (time.time() - dq[0]) > SECURITY_LOGIN_FAIL_WINDOW_SECONDS:
+        dq.popleft()
+    if len(dq) >= SECURITY_LOGIN_FAIL_THRESHOLD:
+        await _security_ban_temp(ip, reason="login_bruteforce")
+        _security_login_fail_hits.pop(ip, None)
+
+
+async def _security_clear_login_failures(ip: str) -> None:
+    _security_login_fail_hits.pop(ip, None)
+
+
+@app.middleware("http")
+async def security_ban_middleware(request: Request, call_next):
+    if not SECURITY_ENABLED:
+        return await call_next(request)
+
+    ip = get_client_ip_for_security(request)
+    path = request.url.path
+
+    async with _security_lock:
+        banned = await _security_check_ban(ip)
+    if banned is not None:
+        return banned
+
+    response = await call_next(request)
+
+    # 统计虚假路径/扫描：以 404 为信号
+    if response.status_code == 404 and not _security_is_ignorable_404_path(path):
+        async with _security_lock:
+            # 再次检查（避免刚被 ban 后仍记录）
+            if ip not in _security_perm_bans and ip not in _security_temp_bans:
+                await _security_record_404(ip)
+
+    return response
 
 # ---------- Uptime 追踪中间件 ----------
 @app.middleware("http")
@@ -963,14 +1104,29 @@ def create_chunk(id: str, created: int, model: str, delta: dict, finish_reason: 
 # ---------- Auth endpoints (API) ----------
 
 @app.post("/login")
-async def admin_login_post(request: Request, admin_key: str = Form(...)):
+async def admin_login_post(request: Request, username: str = Form(...), password: str = Form(...)):
     """Admin login (API)"""
-    if admin_key == ADMIN_KEY:
+    ip = get_client_ip_for_security(request) if SECURITY_ENABLED else (request.client.host if request.client else "unknown")
+
+    if SECURITY_ENABLED:
+        async with _security_lock:
+            banned = await _security_check_ban(ip)
+        if banned is not None:
+            return banned
+
+    if username == ADMIN_USERNAME and password == ADMIN_KEY:
         login_user(request)
+        if SECURITY_ENABLED:
+            async with _security_lock:
+                await _security_clear_login_failures(ip)
         logger.info("[AUTH] Admin login success")
         return {"success": True}
-    logger.warning("[AUTH] Login failed - invalid key")
-    raise HTTPException(401, "Invalid key")
+
+    logger.warning("[AUTH] Login failed - invalid credentials")
+    if SECURITY_ENABLED:
+        async with _security_lock:
+            await _security_record_login_failure(ip)
+    raise HTTPException(401, "Invalid credentials")
 
 
 @app.post("/logout")
@@ -2476,64 +2632,8 @@ async def get_public_display():
 
 @app.get("/public/log")
 async def get_public_logs(request: Request, limit: int = 100):
-    try:
-        # 基于IP的访问统计（24小时内去重）
-        client_ip = request.client.host
-        current_time = time.time()
-
-        async with stats_lock:
-            # 清理24小时前的IP记录
-            if "visitor_ips" not in global_stats:
-                global_stats["visitor_ips"] = {}
-            global_stats["visitor_ips"] = {
-                ip: timestamp for ip, timestamp in global_stats["visitor_ips"].items()
-                if current_time - timestamp <= 86400
-            }
-
-            # 记录新访问（24小时内同一IP只计数一次）
-            if client_ip not in global_stats["visitor_ips"]:
-                global_stats["visitor_ips"][client_ip] = current_time
-                global_stats["total_visitors"] = global_stats.get("total_visitors", 0) + 1
-
-            global_stats.setdefault("recent_conversations", [])
-            await save_stats(global_stats)
-
-            stored_logs = list(global_stats.get("recent_conversations", []))
-
-        sanitized_logs = get_sanitized_logs(limit=min(limit, 1000))
-
-        log_map = {log.get("request_id"): log for log in sanitized_logs}
-        for log in stored_logs:
-            request_id = log.get("request_id")
-            if request_id and request_id not in log_map:
-                log_map[request_id] = log
-
-        def get_log_ts(item: dict) -> float:
-            if "start_ts" in item:
-                return float(item["start_ts"])
-            try:
-                return datetime.strptime(item.get("start_time", ""), "%Y-%m-%d %H:%M:%S").timestamp()
-            except Exception:
-                return 0.0
-
-        merged_logs = sorted(log_map.values(), key=get_log_ts, reverse=True)[:min(limit, 1000)]
-        output_logs = []
-        for log in merged_logs:
-            if "start_ts" in log:
-                log = dict(log)
-                log.pop("start_ts", None)
-            output_logs.append(log)
-
-        return {
-            "total": len(output_logs),
-            "logs": output_logs
-        }
-    except Exception as e:
-        logger.error(f"[LOG] 获取公开日志失败: {e}")
-        return {"total": 0, "logs": [], "error": str(e)}
-    except Exception as e:
-        logger.error(f"[LOG] 获取公开日志失败: {e}")
-        return {"total": 0, "logs": [], "error": str(e)}
+    # new-api 作为网关转发时，外部用户不应获取任何后台请求日志，避免隐私/探测风险
+    raise HTTPException(404, "Not Found")
 
 # ---------- 全局 404 处理（必须在最后） ----------
 
