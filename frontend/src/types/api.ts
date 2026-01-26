@@ -84,11 +84,16 @@ export interface Settings {
     duckmail_base_url?: string
     duckmail_api_key?: string
     duckmail_verify_ssl?: boolean
+    gptmail_base_url?: string
+    gptmail_api_key?: string
+    gptmail_verify_ssl?: boolean
     browser_engine?: string
     browser_headless?: boolean
     refresh_window_hours?: number
     register_default_count?: number
     register_domain?: string
+    register_mail_provider?: string
+    register_mail_prefix?: string
   }
   retry: {
     max_new_session_tries: number

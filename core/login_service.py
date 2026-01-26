@@ -11,6 +11,7 @@ from core.account import load_accounts_from_source
 from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError, TaskStatus
 from core.config import config
 from core.duckmail_client import DuckMailClient
+from core.gptmail_client import GPTMailClient
 from core.gemini_automation import GeminiAutomation
 from core.gemini_automation_uc import GeminiAutomationUC
 from core.microsoft_mail_client import MicrosoftMailClient
@@ -173,6 +174,18 @@ class LoginService(BaseTaskService[LoginTask]):
                 log_callback=log_cb,
             )
             client.set_credentials(mail_address)
+        elif mail_provider == "gptmail":
+            mail_address = account.get("mail_address") or account_id
+            if not config.basic.gptmail_api_key:
+                return {"success": False, "email": account_id, "error": "GPTMail API Key 缺失"}
+            client = GPTMailClient(
+                base_url=config.basic.gptmail_base_url,
+                api_key=config.basic.gptmail_api_key,
+                proxy=config.basic.proxy_for_auth,
+                verify_ssl=config.basic.gptmail_verify_ssl,
+                log_callback=log_cb,
+            )
+            client.set_credentials(mail_address)
         elif mail_provider == "duckmail":
             if not mail_password:
                 return {"success": False, "email": account_id, "error": "邮箱密码缺失"}
@@ -285,9 +298,12 @@ class LoginService(BaseTaskService[LoginTask]):
             if mail_provider == "microsoft":
                 if not account.get("mail_client_id") or not account.get("mail_refresh_token"):
                     continue
-            else:
+            elif mail_provider == "duckmail":
                 if not mail_password:
                     continue
+            elif mail_provider == "gptmail":
+                # GPTMail 无需密码
+                pass
             expires_at = account.get("expires_at")
             if not expires_at:
                 continue

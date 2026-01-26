@@ -50,11 +50,16 @@ class BasicConfig(BaseModel):
     duckmail_base_url: str = Field(default="https://api.duckmail.sbs", description="DuckMail API地址")
     duckmail_api_key: str = Field(default="", description="DuckMail API key")
     duckmail_verify_ssl: bool = Field(default=True, description="DuckMail SSL校验")
+    gptmail_base_url: str = Field(default="https://mail.chatgpt.org.uk", description="GPTMail API地址")
+    gptmail_api_key: str = Field(default="", description="GPTMail API key")
+    gptmail_verify_ssl: bool = Field(default=True, description="GPTMail SSL校验")
     browser_engine: str = Field(default="dp", description="浏览器引擎：uc 或 dp")
     browser_headless: bool = Field(default=False, description="自动化浏览器无头模式")
     refresh_window_hours: int = Field(default=1, ge=0, le=24, description="过期刷新窗口（小时）")
     register_default_count: int = Field(default=1, ge=1, description="默认注册数量")
     register_domain: str = Field(default="", description="默认注册域名（推荐）")
+    register_mail_provider: str = Field(default="duckmail", description="注册邮箱服务商：duckmail/gptmail")
+    register_mail_prefix: str = Field(default="", description="注册邮箱前缀（可选）")
 
 
 class ImageGenerationConfig(BaseModel):
@@ -186,7 +191,10 @@ class ConfigManager:
         refresh_window_raw = basic_data.get("refresh_window_hours", 1)
         register_default_raw = basic_data.get("register_default_count", 1)
         register_domain_raw = basic_data.get("register_domain", "")
+        register_mail_provider_raw = basic_data.get("register_mail_provider", "duckmail")
+        register_mail_prefix_raw = basic_data.get("register_mail_prefix", "")
         duckmail_api_key_raw = basic_data.get("duckmail_api_key", "")
+        gptmail_api_key_raw = basic_data.get("gptmail_api_key", "")
 
         # 兼容旧配置：如果存在旧的 proxy 字段，迁移到新字段
         old_proxy = basic_data.get("proxy", "")
@@ -216,11 +224,16 @@ class ConfigManager:
             duckmail_base_url=basic_data.get("duckmail_base_url") or "https://api.duckmail.sbs",
             duckmail_api_key=str(duckmail_api_key_raw or "").strip(),
             duckmail_verify_ssl=_parse_bool(basic_data.get("duckmail_verify_ssl"), True),
+            gptmail_base_url=basic_data.get("gptmail_base_url") or "https://mail.chatgpt.org.uk",
+            gptmail_api_key=str(gptmail_api_key_raw or "").strip(),
+            gptmail_verify_ssl=_parse_bool(basic_data.get("gptmail_verify_ssl"), True),
             browser_engine=basic_data.get("browser_engine") or "dp",
             browser_headless=_parse_bool(basic_data.get("browser_headless"), False),
             refresh_window_hours=int(refresh_window_raw),
             register_default_count=int(register_default_raw),
             register_domain=str(register_domain_raw or "").strip(),
+            register_mail_provider=str(register_mail_provider_raw or "duckmail").strip().lower(),
+            register_mail_prefix=str(register_mail_prefix_raw or "").strip(),
         )
 
         # 4. 加载其他配置（从 YAML）

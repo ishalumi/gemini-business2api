@@ -11,6 +11,7 @@ from core.account import load_accounts_from_source
 from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError, TaskStatus
 from core.config import config
 from core.duckmail_client import DuckMailClient
+from core.gptmail_client import GPTMailClient
 from core.gemini_automation import GeminiAutomation
 from core.gemini_automation_uc import GeminiAutomationUC
 
@@ -144,20 +145,44 @@ class RegisterService(BaseTaskService[RegisterTask]):
         log_cb("info", "🆕 开始注册新账户")
         log_cb("info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        client = DuckMailClient(
-            base_url=config.basic.duckmail_base_url,
-            proxy=config.basic.proxy_for_auth,
-            verify_ssl=config.basic.duckmail_verify_ssl,
-            api_key=config.basic.duckmail_api_key,
-            log_callback=log_cb,
-        )
+        provider = (config.basic.register_mail_provider or "duckmail").lower()
+        if provider == "gptmail":
+            client = GPTMailClient(
+                base_url=config.basic.gptmail_base_url,
+                api_key=config.basic.gptmail_api_key,
+                proxy=config.basic.proxy_for_auth,
+                verify_ssl=config.basic.gptmail_verify_ssl,
+                log_callback=log_cb,
+            )
+            if not config.basic.gptmail_api_key:
+                log_cb("error", "❌ GPTMail API Key 未配置")
+                return {"success": False, "error": "GPTMail API Key 未配置"}
 
-        log_cb("info", "📧 步骤 1/3: 注册 DuckMail 邮箱...")
-        if not client.register_account(domain=domain):
-            log_cb("error", "❌ DuckMail 邮箱注册失败")
-            return {"success": False, "error": "DuckMail 注册失败"}
+            log_cb("info", "📧 步骤 1/3: 生成 GPTMail 邮箱...")
+            email = client.generate_email_with_fallback(
+                domain=domain or "",
+                prefix=config.basic.register_mail_prefix or "",
+            )
+            if not email:
+                log_cb("error", "❌ GPTMail 邮箱生成失败")
+                return {"success": False, "error": "GPTMail 生成失败"}
 
-        log_cb("info", f"✅ DuckMail 邮箱注册成功: {client.email}")
+            log_cb("info", f"✅ GPTMail 邮箱生成成功: {client.email}")
+        else:
+            client = DuckMailClient(
+                base_url=config.basic.duckmail_base_url,
+                proxy=config.basic.proxy_for_auth,
+                verify_ssl=config.basic.duckmail_verify_ssl,
+                api_key=config.basic.duckmail_api_key,
+                log_callback=log_cb,
+            )
+
+            log_cb("info", "📧 步骤 1/3: 注册 DuckMail 邮箱...")
+            if not client.register_account(domain=domain):
+                log_cb("error", "❌ DuckMail 邮箱注册失败")
+                return {"success": False, "error": "DuckMail 注册失败"}
+
+            log_cb("info", f"✅ DuckMail 邮箱注册成功: {client.email}")
 
         # 根据配置选择浏览器引擎
         browser_engine = (config.basic.browser_engine or "dp").lower()
@@ -218,9 +243,14 @@ class RegisterService(BaseTaskService[RegisterTask]):
         log_cb("info", "✅ Gemini 登录成功，正在保存配置...")
 
         config_data = result["config"]
-        config_data["mail_provider"] = "duckmail"
-        config_data["mail_address"] = client.email
-        config_data["mail_password"] = client.password
+        if provider == "gptmail":
+            config_data["mail_provider"] = "gptmail"
+            config_data["mail_address"] = client.email
+            config_data["mail_password"] = ""
+        else:
+            config_data["mail_provider"] = "duckmail"
+            config_data["mail_address"] = client.email
+            config_data["mail_password"] = client.password
 
         accounts_data = load_accounts_from_source()
         updated = False

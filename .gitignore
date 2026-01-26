@@ -45,3 +45,6 @@ static/
 .DS_Store
 Thumbs.db
 old_version.py
+
+# GPT Mail
+gpt-mail/

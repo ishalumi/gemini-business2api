@@ -136,6 +136,38 @@
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
                   placeholder="dk_xxx"
                 />
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>GPTMail API</span>
+                  <HelpTip text="临时邮箱服务（API Key 必填）" />
+                </div>
+                <input
+                  v-model="localSettings.basic.gptmail_base_url"
+                  type="text"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="https://mail.chatgpt.org.uk"
+                />
+                <input
+                  v-model="localSettings.basic.gptmail_api_key"
+                  type="text"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="gpt-test"
+                />
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>注册邮箱服务商</span>
+                  <HelpTip text="注册时使用的邮箱来源" />
+                </div>
+                <SelectMenu
+                  v-model="localSettings.basic.register_mail_provider"
+                  :options="mailProviderOptions"
+                  class="w-full"
+                />
+                <label class="block text-xs text-muted-foreground">注册邮箱前缀（可选）</label>
+                <input
+                  v-model="localSettings.basic.register_mail_prefix"
+                  type="text"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="myname"
+                />
               </div>
             </div>
 
@@ -385,6 +417,10 @@ const browserEngineOptions = [
   { label: 'UC - 支持无头/有头', value: 'uc' },
   { label: 'DP - 支持无头/有头（推荐）', value: 'dp' },
 ]
+const mailProviderOptions = [
+  { label: 'DuckMail', value: 'duckmail' },
+  { label: 'GPTMail', value: 'gptmail' },
+]
 const imageOutputOptions = [
   { label: 'Base64 编码', value: 'base64' },
   { label: 'URL 链接', value: 'url' },
@@ -423,6 +459,7 @@ watch(settings, (value) => {
   next.basic = next.basic || {}
   next.basic.duckmail_base_url ||= 'https://api.duckmail.sbs'
   next.basic.duckmail_verify_ssl = next.basic.duckmail_verify_ssl ?? true
+  next.basic.gptmail_verify_ssl = next.basic.gptmail_verify_ssl ?? true
   next.basic.browser_engine = next.basic.browser_engine || 'dp'
   next.basic.browser_headless = next.basic.browser_headless ?? false
   next.basic.refresh_window_hours = Number.isFinite(next.basic.refresh_window_hours)
@@ -436,6 +473,18 @@ watch(settings, (value) => {
     : ''
   next.basic.duckmail_api_key = typeof next.basic.duckmail_api_key === 'string'
     ? next.basic.duckmail_api_key
+    : ''
+  next.basic.gptmail_base_url = typeof next.basic.gptmail_base_url === 'string'
+    ? next.basic.gptmail_base_url
+    : 'https://mail.chatgpt.org.uk'
+  next.basic.gptmail_api_key = typeof next.basic.gptmail_api_key === 'string'
+    ? next.basic.gptmail_api_key
+    : ''
+  next.basic.register_mail_provider = typeof next.basic.register_mail_provider === 'string'
+    ? next.basic.register_mail_provider
+    : 'duckmail'
+  next.basic.register_mail_prefix = typeof next.basic.register_mail_prefix === 'string'
+    ? next.basic.register_mail_prefix
     : ''
   next.automation = next.automation || {}
   next.automation.stealth_enabled = next.automation.stealth_enabled ?? true

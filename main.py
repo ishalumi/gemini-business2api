@@ -1638,11 +1638,16 @@ async def admin_get_settings(request: Request):
             "duckmail_base_url": config.basic.duckmail_base_url,
             "duckmail_api_key": config.basic.duckmail_api_key,
             "duckmail_verify_ssl": config.basic.duckmail_verify_ssl,
+            "gptmail_base_url": config.basic.gptmail_base_url,
+            "gptmail_api_key": config.basic.gptmail_api_key,
+            "gptmail_verify_ssl": config.basic.gptmail_verify_ssl,
             "browser_engine": config.basic.browser_engine,
             "browser_headless": config.basic.browser_headless,
             "refresh_window_hours": config.basic.refresh_window_hours,
             "register_default_count": config.basic.register_default_count,
             "register_domain": config.basic.register_domain,
+            "register_mail_provider": config.basic.register_mail_provider,
+            "register_mail_prefix": config.basic.register_mail_prefix,
         },
         "image_generation": {
             "enabled": config.image_generation.enabled,
@@ -1697,13 +1702,22 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         basic.setdefault("duckmail_base_url", config.basic.duckmail_base_url)
         basic.setdefault("duckmail_api_key", config.basic.duckmail_api_key)
         basic.setdefault("duckmail_verify_ssl", config.basic.duckmail_verify_ssl)
+        basic.setdefault("gptmail_base_url", config.basic.gptmail_base_url)
+        basic.setdefault("gptmail_api_key", config.basic.gptmail_api_key)
+        basic.setdefault("gptmail_verify_ssl", config.basic.gptmail_verify_ssl)
         basic.setdefault("browser_engine", config.basic.browser_engine)
         basic.setdefault("browser_headless", config.basic.browser_headless)
         basic.setdefault("refresh_window_hours", config.basic.refresh_window_hours)
         basic.setdefault("register_default_count", config.basic.register_default_count)
         basic.setdefault("register_domain", config.basic.register_domain)
+        basic.setdefault("register_mail_provider", config.basic.register_mail_provider)
+        basic.setdefault("register_mail_prefix", config.basic.register_mail_prefix)
         if not isinstance(basic.get("register_domain"), str):
             basic["register_domain"] = ""
+        if not isinstance(basic.get("register_mail_provider"), str):
+            basic["register_mail_provider"] = "duckmail"
+        if not isinstance(basic.get("register_mail_prefix"), str):
+            basic["register_mail_prefix"] = ""
         basic.pop("duckmail_proxy", None)
         new_settings["basic"] = basic
 
