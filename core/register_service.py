@@ -181,9 +181,15 @@ class RegisterService(BaseTaskService[RegisterTask]):
                 log_cb("error", "❌ MoeMail API Key 未配置")
                 return {"success": False, "error": "MoeMail API Key 未配置"}
 
+            # 支持多域名随机选取（逗号分隔）
+            moemail_domains = [d.strip() for d in (config.basic.moemail_domain or "").split(",") if d.strip()]
+            selected_domain = random.choice(moemail_domains) if moemail_domains else ""
+
             log_cb("info", "📧 步骤 1/3: 生成 MoeMail 邮箱...")
+            if selected_domain:
+                log_cb("info", f"📧 使用域名: {selected_domain}")
             result = client.generate_email(
-                domain=config.basic.moemail_domain or "",
+                domain=selected_domain,
                 prefix=config.basic.register_mail_prefix or "",
             )
             if not result:

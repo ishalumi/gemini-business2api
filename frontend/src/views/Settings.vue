@@ -202,13 +202,16 @@
                     </div>
                   </div>
                   <div class="space-y-2">
-                    <label for="moemail-domain" class="block text-xs text-muted-foreground">MoeMail 邮箱域名</label>
+                    <div class="flex items-center justify-between gap-2">
+                      <label for="moemail-domain" class="block text-xs text-muted-foreground">MoeMail 邮箱域名</label>
+                      <HelpTip text="支持多个域名，用逗号分隔，注册时随机选取" />
+                    </div>
                     <input
                       id="moemail-domain"
                       v-model="localSettings.basic.moemail_domain"
                       type="text"
                       class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                      placeholder="ishailluminas.ggff.net"
+                      placeholder="a.com, b.com, c.com"
                     />
                   </div>
                 </div>
