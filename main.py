@@ -515,18 +515,28 @@ logger.info("[SYSTEM] 系统初始化完成")
 # (消息处理函数已移至 core/message.py)
 
 # ---------- 媒体处理函数 ----------
-def process_image(data: bytes, mime: str, chat_id: str, file_id: str, base_url: str, idx: int, request_id: str, account_id: str) -> str:
-    """处理图片：根据配置返回 base64 或 URL"""
+def process_image(
+    data: bytes,
+    mime: str,
+    chat_id: str,
+    file_id: str,
+    base_url: str,
+    idx: int,
+    request_id: str,
+    account_id: str,
+    force_url: bool = False
+) -> str:
+    """处理图片：根据配置返回 base64 或 URL（可强制 URL）"""
     output_format = config_manager.image_output_format
 
-    if output_format == "base64":
+    if output_format == "base64" and not force_url:
         b64 = base64.b64encode(data).decode()
         logger.info(f"[IMAGE] [{account_id}] [req_{request_id}] 图片{idx}已编码为base64")
         return f"\n\n![生成的图片](data:{mime};base64,{b64})\n\n"
-    else:
-        url = save_image_to_hf(data, chat_id, file_id, mime, base_url, IMAGE_DIR)
-        logger.info(f"[IMAGE] [{account_id}] [req_{request_id}] 图片{idx}已保存: {url}")
-        return f"\n\n![生成的图片]({url})\n\n"
+
+    url = save_image_to_hf(data, chat_id, file_id, mime, base_url, IMAGE_DIR)
+    logger.info(f"[IMAGE] [{account_id}] [req_{request_id}] 图片{idx}已保存: {url}")
+    return f"\n\n![生成的图片]({url})\n\n"
 
 def process_video(data: bytes, mime: str, chat_id: str, file_id: str, base_url: str, idx: int, request_id: str, account_id: str) -> str:
     """处理视频：根据配置返回不同格式"""
@@ -542,13 +552,23 @@ def process_video(data: bytes, mime: str, chat_id: str, file_id: str, base_url: 
     else:  # url
         return f"\n\n{url}\n\n"
 
-def process_media(data: bytes, mime: str, chat_id: str, file_id: str, base_url: str, idx: int, request_id: str, account_id: str) -> str:
+def process_media(
+    data: bytes,
+    mime: str,
+    chat_id: str,
+    file_id: str,
+    base_url: str,
+    idx: int,
+    request_id: str,
+    account_id: str,
+    force_url: bool = False
+) -> str:
     """统一媒体处理入口：根据 MIME 类型分发到对应处理器"""
     logger.info(f"[MEDIA] [{account_id}] [req_{request_id}] 处理媒体{idx}: MIME={mime}")
     if mime.startswith("video/"):
         return process_video(data, mime, chat_id, file_id, base_url, idx, request_id, account_id)
     else:
-        return process_image(data, mime, chat_id, file_id, base_url, idx, request_id, account_id)
+        return process_image(data, mime, chat_id, file_id, base_url, idx, request_id, account_id, force_url=force_url)
 
 # ---------- OpenAI 兼容接口 ----------
 app = FastAPI(title="Gemini-Business OpenAI Gateway")
@@ -2844,7 +2864,16 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
                     continue
 
                 try:
-                    markdown = process_media(result, mime, chat_id, fid, base_url, idx, request_id, account_manager.config.account_id)
+                    markdown = process_media(
+                        result,
+                        mime,
+                        chat_id,
+                        fid,
+                        base_url,
+                        idx,
+                        request_id,
+                        account_manager.config.account_id
+                    )
                     success_count += 1
                     chunk = create_chunk(chat_id, created_time, model_name, {"content": markdown}, None)
                     yield f"data: {chunk}\n\n"
