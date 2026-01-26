@@ -2356,6 +2356,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
 
 
     tools_spec = get_tools_spec(model_name)
+    expects_media = bool(tools_spec.get("imageGenerationSpec") or tools_spec.get("videoGenerationSpec"))
 
     body = {
         "configId": account_manager.config.config_id,
@@ -2386,6 +2387,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
     # 使用流式请求
     json_objects = []  # 收集所有响应对象用于图片解析
     file_ids_info = None  # 保存图片信息
+    parsed_session_name = ""
 
     # 生图/思维链等阶段可能会出现“上游长时间无输出”，这里通过：
     # 1) 禁用 read timeout（避免 httpx 自己掐断）
@@ -2492,8 +2494,10 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
 
             # 提取图片信息（在 async with 块内）
             if json_objects:
-                file_ids, session_name = parse_images_from_response(json_objects)
-                if file_ids and session_name:
+                file_ids, parsed_session_name = parse_images_from_response(json_objects)
+                if file_ids:
+                    # session_name 可能为空，优先使用解析结果，否则退回当前会话
+                    session_name = parsed_session_name or session
                     file_ids_info = (file_ids, session_name)
                     logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 检测到{len(file_ids)}张生成图片")
 
@@ -2507,11 +2511,77 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
             raise
 
     # 在 async with 块外处理图片下载（避免占用上游连接）
+    file_metadata = {}
+    if expects_media:
+        try:
+            poll_timeout_seconds = float(os.getenv("IMAGE_METADATA_POLL_SECONDS", "180"))
+        except ValueError:
+            poll_timeout_seconds = 180.0
+        try:
+            poll_interval_seconds = float(os.getenv("IMAGE_METADATA_POLL_INTERVAL_SECONDS", "3"))
+        except ValueError:
+            poll_interval_seconds = 3.0
+        poll_interval_seconds = max(1.0, poll_interval_seconds)
+        poll_session_name = (file_ids_info[1] if file_ids_info else parsed_session_name) or session
+
+        if poll_timeout_seconds > 0 and poll_session_name:
+            expected_file_ids = []
+            if file_ids_info:
+                expected_file_ids = [f.get("fileId") for f in file_ids_info[0] if f.get("fileId")]
+
+            logger.info(
+                f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 等待生成文件元数据 "
+                f"(timeout={poll_timeout_seconds:.0f}s, interval={poll_interval_seconds:.0f}s)"
+            )
+            start_poll = time.time()
+            try:
+                while time.time() - start_poll < poll_timeout_seconds:
+                    file_metadata = await get_session_file_metadata(
+                        account_manager,
+                        poll_session_name,
+                        http_client,
+                        USER_AGENT,
+                        request_id
+                    )
+                    if file_metadata:
+                        if not expected_file_ids:
+                            # 没有解析到 fileId 时，直接使用元数据里的文件
+                            file_ids = [
+                                {"fileId": fid, "mimeType": meta.get("mimeType", "image/png")}
+                                for fid, meta in file_metadata.items()
+                            ]
+                            file_ids_info = (file_ids, poll_session_name)
+                            break
+
+                        missing = [fid for fid in expected_file_ids if fid not in file_metadata]
+                        if not missing:
+                            break
+
+                    if is_stream and heartbeat_payload and (time.time() - last_yield_ts) >= heartbeat_interval_seconds:
+                        yield heartbeat_payload
+                        last_yield_ts = time.time()
+
+                    await asyncio.sleep(poll_interval_seconds)
+            except asyncio.CancelledError:
+                raise
+            except Exception as poll_err:
+                logger.warning(
+                    f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 文件元数据轮询异常: "
+                    f"{type(poll_err).__name__}: {str(poll_err)[:100]}"
+                )
+
     if file_ids_info:
         file_ids, session_name = file_ids_info
         try:
             base_url = get_base_url(request) if request else ""
-            file_metadata = await get_session_file_metadata(account_manager, session_name, http_client, USER_AGENT, request_id)
+            if not file_metadata:
+                file_metadata = await get_session_file_metadata(
+                    account_manager,
+                    session_name,
+                    http_client,
+                    USER_AGENT,
+                    request_id
+                )
 
             # 并行下载所有图片
             download_tasks = []
@@ -2557,6 +2627,12 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
             error_msg = f"\n\n⚠️ 图片处理失败: {type(e).__name__}\n\n"
             chunk = create_chunk(chat_id, created_time, model_name, {"content": error_msg}, None)
             yield f"data: {chunk}\n\n"
+    elif expects_media:
+        # 需要生成图片但未检测到文件，提示用户稍后重试
+        logger.warning(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 未检测到生成文件")
+        warn_msg = "\n\n⚠️ 未检测到生成文件，可能仍在处理中，请稍后重试。\n\n"
+        chunk = create_chunk(chat_id, created_time, model_name, {"content": warn_msg}, None)
+        yield f"data: {chunk}\n\n"
 
     if full_content:
         response_preview = full_content[:500] + "...(已截断)" if len(full_content) > 500 else full_content
