@@ -90,6 +90,30 @@ class RetryConfig(BaseModel):
     auto_refresh_accounts_seconds: int = Field(default=60, ge=0, le=600, description="自动刷新账号间隔（秒，0禁用）")
 
 
+class AutomationConfig(BaseModel):
+    """自动化与反检测配置"""
+    stealth_enabled: bool = Field(default=True, description="启用反检测脚本")
+    webrtc_protect: bool = Field(default=True, description="禁用 WebRTC 泄露")
+    timezone: str = Field(default="", description="浏览器时区（如 America/Los_Angeles）")
+    geo_latitude: Optional[float] = Field(default=None, ge=-90, le=90, description="地理位置纬度")
+    geo_longitude: Optional[float] = Field(default=None, ge=-180, le=180, description="地理位置经度")
+    geo_accuracy: int = Field(default=50, ge=1, le=10000, description="地理位置精度（米）")
+    random_delay_min_ms: int = Field(default=120, ge=0, le=5000, description="随机延迟最小值（毫秒）")
+    random_delay_max_ms: int = Field(default=380, ge=0, le=5000, description="随机延迟最大值（毫秒）")
+    between_account_min_seconds: int = Field(default=0, ge=0, le=600, description="注册账号间隔最小值（秒）")
+    between_account_max_seconds: int = Field(default=0, ge=0, le=600, description="注册账号间隔最大值（秒）")
+
+    @validator("random_delay_max_ms")
+    def validate_random_delay_max(cls, v, values):
+        min_v = values.get("random_delay_min_ms", 0)
+        return max(v, min_v)
+
+    @validator("between_account_max_seconds")
+    def validate_between_account_max(cls, v, values):
+        min_v = values.get("between_account_min_seconds", 0)
+        return max(v, min_v)
+
+
 class PublicDisplayConfig(BaseModel):
     """公开展示配置"""
     logo_url: str = Field(default="", description="Logo URL")
@@ -118,6 +142,7 @@ class AppConfig(BaseModel):
     image_generation: ImageGenerationConfig
     video_generation: VideoGenerationConfig = Field(default_factory=VideoGenerationConfig)
     retry: RetryConfig
+    automation: AutomationConfig
     public_display: PublicDisplayConfig
     session: SessionConfig
 
@@ -217,6 +242,40 @@ class ConfigManager:
 
         retry_config = RetryConfig(**retry_data)
 
+        # 加载自动化配置（反检测/时区/地理位置/随机延迟）
+        automation_data = dict(yaml_data.get("automation", {}))
+        try:
+            delay_min = int(automation_data.get("random_delay_min_ms", 120))
+        except Exception:
+            delay_min = 120
+        try:
+            delay_max = int(automation_data.get("random_delay_max_ms", 380))
+        except Exception:
+            delay_max = 380
+        if delay_min < 0:
+            delay_min = 0
+        if delay_max < delay_min:
+            delay_max = delay_min
+        automation_data["random_delay_min_ms"] = delay_min
+        automation_data["random_delay_max_ms"] = delay_max
+
+        try:
+            between_min = int(automation_data.get("between_account_min_seconds", 0))
+        except Exception:
+            between_min = 0
+        try:
+            between_max = int(automation_data.get("between_account_max_seconds", 0))
+        except Exception:
+            between_max = 0
+        if between_min < 0:
+            between_min = 0
+        if between_max < between_min:
+            between_max = between_min
+        automation_data["between_account_min_seconds"] = between_min
+        automation_data["between_account_max_seconds"] = between_max
+
+        automation_config = AutomationConfig(**automation_data)
+
         public_display_config = PublicDisplayConfig(
             **yaml_data.get("public_display", {})
         )
@@ -232,6 +291,7 @@ class ConfigManager:
             image_generation=image_generation_config,
             video_generation=video_generation_config,
             retry=retry_config,
+            automation=automation_config,
             public_display=public_display_config,
             session=session_config
         )

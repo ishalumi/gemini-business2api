@@ -42,12 +42,28 @@ class GeminiAutomation:
         user_agent: str = "",
         proxy: str = "",
         headless: bool = True,
+        stealth_enabled: bool = True,
+        webrtc_protect: bool = True,
+        timezone: str = "",
+        geo_latitude: Optional[float] = None,
+        geo_longitude: Optional[float] = None,
+        geo_accuracy: int = 50,
+        random_delay_min_ms: int = 120,
+        random_delay_max_ms: int = 380,
         timeout: int = 60,
         log_callback=None,
     ) -> None:
         self.user_agent = user_agent or self._get_ua()
         self.proxy = proxy
         self.headless = headless
+        self.stealth_enabled = stealth_enabled
+        self.webrtc_protect = webrtc_protect
+        self.timezone = timezone
+        self.geo_latitude = geo_latitude
+        self.geo_longitude = geo_longitude
+        self.geo_accuracy = geo_accuracy
+        self.random_delay_min_ms = max(0, int(random_delay_min_ms))
+        self.random_delay_max_ms = max(self.random_delay_min_ms, int(random_delay_max_ms))
         self.timeout = timeout
         self.log_callback = log_callback
         self._page = None
@@ -112,6 +128,11 @@ class GeminiAutomation:
         if self.proxy:
             options.set_argument(f"--proxy-server={self.proxy}")
 
+        if self.webrtc_protect:
+            # 避免 WebRTC 暴露真实 IP（仅影响浏览器网络）
+            options.set_argument("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
+            options.set_argument("--webrtc-ip-handling-policy=disable_non_proxied_udp")
+
         if self.headless:
             # 使用新版无头模式，更接近真实浏览器
             options.set_argument("--headless=new")
@@ -126,8 +147,8 @@ class GeminiAutomation:
         page = ChromiumPage(options)
         page.set.timeouts(self.timeout)
 
-        # 反检测：注入脚本隐藏自动化特征
-        if self.headless:
+        # 反检测：注入脚本隐藏自动化特征（无头/有头均可）
+        if self.stealth_enabled:
             try:
                 page.run_cdp("Page.addScriptToEvaluateOnNewDocument", source="""
                     Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
@@ -155,7 +176,50 @@ class GeminiAutomation:
             except Exception:
                 pass
 
+        # 时区/地理位置模拟（可选）
+        self._apply_emulation(page)
+
         return page
+
+    def _apply_emulation(self, page) -> None:
+        """设置时区与地理位置（CDP）"""
+        if self.timezone:
+            try:
+                page.run_cdp("Emulation.setTimezoneOverride", timezoneId=self.timezone)
+            except Exception:
+                pass
+
+        if self.geo_latitude is not None and self.geo_longitude is not None:
+            try:
+                page.run_cdp(
+                    "Emulation.setGeolocationOverride",
+                    latitude=float(self.geo_latitude),
+                    longitude=float(self.geo_longitude),
+                    accuracy=float(self.geo_accuracy or 50),
+                )
+                # 授权地理位置权限（避免弹窗）
+                try:
+                    page.run_cdp(
+                        "Browser.grantPermissions",
+                        origin="https://auth.business.gemini.google",
+                        permissions=["geolocation"]
+                    )
+                    page.run_cdp(
+                        "Browser.grantPermissions",
+                        origin="https://business.gemini.google",
+                        permissions=["geolocation"]
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    def _sleep(self, base_seconds: float) -> None:
+        """随机化等待时间"""
+        extra = 0.0
+        if self.random_delay_max_ms > 0:
+            extra = random.uniform(self.random_delay_min_ms, self.random_delay_max_ms) / 1000.0
+        time.sleep(max(0, base_seconds) + extra)
 
     def _run_flow(self, page, email: str, mail_client) -> dict:
         """执行登录流程"""
@@ -168,7 +232,7 @@ class GeminiAutomation:
         self._log("info", f"🌐 正在打开登录页面: {email}")
 
         page.get(AUTH_HOME_URL, timeout=self.timeout)
-        time.sleep(2)
+        self._sleep(2)
 
         # 设置两个关键 Cookie
         try:
@@ -196,7 +260,7 @@ class GeminiAutomation:
         login_url = f"https://auth.business.gemini.google/login/email?continueUrl=https%3A%2F%2Fbusiness.gemini.google%2F&loginHint={login_hint}&xsrfToken={DEFAULT_XSRF_TOKEN}"
         self._log("info", "🔗 正在访问登录链接...")
         page.get(login_url, timeout=self.timeout)
-        time.sleep(5)
+        self._sleep(5)
 
         # Step 2: 检查当前页面状态
         current_url = page.url
@@ -259,7 +323,7 @@ class GeminiAutomation:
         if not self._simulate_human_input(code_input, code):
             self._log("warning", "⚠️ 模拟输入失败，降级为直接输入")
             code_input.input(code, clear=True)
-            time.sleep(0.5)
+            self._sleep(0.5)
 
         # 直接使用回车提交，不再查找按钮
         self._log("info", "⏎ 按下回车键提交验证码")
@@ -267,7 +331,7 @@ class GeminiAutomation:
 
         # Step 7: 等待页面自动重定向（提交验证码后 Google 会自动跳转）
         self._log("info", "⏳ 等待验证后自动跳转...")
-        time.sleep(12)  # 增加等待时间，让页面有足够时间完成重定向（如果网络慢可以继续增加）
+        self._sleep(12)  # 增加等待时间，让页面有足够时间完成重定向（如果网络慢可以继续增加）
 
         # 记录当前 URL 状态
         current_url = page.url
@@ -295,21 +359,21 @@ class GeminiAutomation:
         if "business.gemini.google" not in current_url:
             self._log("info", "navigating to business page")
             page.get("https://business.gemini.google/", timeout=self.timeout)
-            time.sleep(5)  # 增加等待时间
+            self._sleep(5)  # 增加等待时间
             current_url = page.url
             self._log("info", f"URL after navigation: {current_url}")
 
         # Step 11: 检查是否需要设置用户名
         if "cid" not in page.url:
             if self._handle_username_setup(page):
-                time.sleep(5)  # 增加等待时间
+                self._sleep(5)  # 增加等待时间
 
         # Step 12: 等待 URL 参数生成（csesidx 和 cid）
         self._log("info", "waiting for URL parameters")
         if not self._wait_for_business_params(page):
             self._log("warning", "URL parameters not generated, trying refresh")
             page.refresh()
-            time.sleep(5)  # 增加等待时间
+            self._sleep(5)  # 增加等待时间
             if not self._wait_for_business_params(page):
                 self._log("error", "URL parameters generation failed")
                 current_url = page.url
@@ -323,7 +387,7 @@ class GeminiAutomation:
 
     def _click_send_code_button(self, page) -> bool:
         """点击发送验证码按钮（如果需要）"""
-        time.sleep(2)
+        self._sleep(2)
 
         # 方法1: 直接通过ID查找
         direct_btn = page.ele("#sign-in-with-email", timeout=5)
@@ -331,7 +395,7 @@ class GeminiAutomation:
             try:
                 direct_btn.click()
                 self._log("info", "✅ 找到并点击了发送验证码按钮 (ID: #sign-in-with-email)")
-                time.sleep(3)  # 等待发送请求
+                self._sleep(3)  # 等待发送请求
                 return True
             except Exception as e:
                 self._log("warning", f"⚠️ 点击按钮失败: {e}")
@@ -348,7 +412,7 @@ class GeminiAutomation:
                         self._log("info", f"✅ 找到匹配按钮: '{text}'")
                         btn.click()
                         self._log("info", "✅ 成功点击发送验证码按钮")
-                        time.sleep(3)  # 等待发送请求
+                        self._sleep(3)  # 等待发送请求
                         return True
                     except Exception as e:
                         self._log("warning", f"⚠️ 点击按钮失败: {e}")
@@ -380,7 +444,7 @@ class GeminiAutomation:
                         return el
                 except Exception:
                     continue
-            time.sleep(2)
+            self._sleep(2)
         return None
 
     def _simulate_human_input(self, element, text: str) -> bool:
@@ -426,7 +490,7 @@ class GeminiAutomation:
 
     def _click_resend_code_button(self, page) -> bool:
         """点击重新发送验证码按钮"""
-        time.sleep(2)
+        self._sleep(2)
 
         # 查找包含重新发送关键词的按钮（与 _find_verify_button 相反）
         try:
@@ -437,7 +501,7 @@ class GeminiAutomation:
                     try:
                         self._log("info", f"found resend button: {text}")
                         btn.click()
-                        time.sleep(2)
+                        self._sleep(2)
                         return True
                     except Exception:
                         pass
@@ -452,14 +516,14 @@ class GeminiAutomation:
             agree_btn = page.ele("css:button.agree-button", timeout=5)
             if agree_btn:
                 agree_btn.click()
-                time.sleep(2)
+                self._sleep(2)
 
     def _wait_for_cid(self, page, timeout: int = 10) -> bool:
         """等待URL包含cid"""
         for _ in range(timeout):
             if "cid" in page.url:
                 return True
-            time.sleep(1)
+            self._sleep(1)
         return False
 
     def _wait_for_business_params(self, page, timeout: int = 30) -> bool:
@@ -469,7 +533,7 @@ class GeminiAutomation:
             if "csesidx=" in url and "/cid/" in url:
                 self._log("info", f"business params ready: {url}")
                 return True
-            time.sleep(1)
+            self._sleep(1)
         return False
 
     def _handle_username_setup(self, page) -> bool:
@@ -504,15 +568,15 @@ class GeminiAutomation:
         try:
             # 清空输入框
             username_input.click()
-            time.sleep(0.2)
+            self._sleep(0.2)
             username_input.clear()
-            time.sleep(0.1)
+            self._sleep(0.1)
 
             # 尝试模拟人类输入，失败则降级到直接注入
             if not self._simulate_human_input(username_input, username):
                 self._log("warning", "simulated username input failed, fallback to direct input")
                 username_input.input(username)
-                time.sleep(0.3)
+                self._sleep(0.3)
 
             buttons = page.eles("tag:button")
             submit_btn = None
@@ -527,7 +591,7 @@ class GeminiAutomation:
             else:
                 username_input.input("\n")
 
-            time.sleep(5)
+            self._sleep(5)
             return True
         except Exception:
             return False
@@ -537,7 +601,7 @@ class GeminiAutomation:
         try:
             if "cid/" not in page.url:
                 page.get("https://business.gemini.google/", timeout=self.timeout)
-                time.sleep(3)
+                self._sleep(3)
 
             url = page.url
             if "cid/" not in url:

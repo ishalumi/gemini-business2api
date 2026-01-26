@@ -31,12 +31,28 @@ class GeminiAutomationUC:
         user_agent: str = "",
         proxy: str = "",
         headless: bool = True,
+        stealth_enabled: bool = True,
+        webrtc_protect: bool = True,
+        timezone: str = "",
+        geo_latitude: Optional[float] = None,
+        geo_longitude: Optional[float] = None,
+        geo_accuracy: int = 50,
+        random_delay_min_ms: int = 120,
+        random_delay_max_ms: int = 380,
         timeout: int = 60,
         log_callback=None,
     ) -> None:
         self.user_agent = user_agent or self._get_ua()
         self.proxy = proxy
         self.headless = headless
+        self.stealth_enabled = stealth_enabled
+        self.webrtc_protect = webrtc_protect
+        self.timezone = timezone
+        self.geo_latitude = geo_latitude
+        self.geo_longitude = geo_longitude
+        self.geo_accuracy = geo_accuracy
+        self.random_delay_min_ms = max(0, int(random_delay_min_ms))
+        self.random_delay_max_ms = max(self.random_delay_min_ms, int(random_delay_max_ms))
         self.timeout = timeout
         self.log_callback = log_callback
         self.driver = None
@@ -87,6 +103,10 @@ class GeminiAutomationUC:
         if self.proxy:
             options.add_argument(f"--proxy-server={self.proxy}")
 
+        if self.webrtc_protect:
+            options.add_argument("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
+            options.add_argument("--webrtc-ip-handling-policy=disable_non_proxied_udp")
+
         # 无头模式
         if self.headless:
             options.add_argument("--headless=new")
@@ -108,6 +128,34 @@ class GeminiAutomationUC:
         self.driver.set_page_load_timeout(self.timeout)
         self.driver.implicitly_wait(10)
 
+        # 反检测脚本（可选）
+        if self.stealth_enabled:
+            try:
+                self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                    "source": """
+                        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                        Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
+                        window.chrome = {runtime: {}};
+                        Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 1});
+                        Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                        Object.defineProperty(navigator, 'vendor', {get: () => 'Google Inc.'});
+                        Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                        Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+                        const originalQuery = window.navigator.permissions.query;
+                        window.navigator.permissions.query = (parameters) => (
+                            parameters.name === 'notifications' ?
+                                Promise.resolve({state: Notification.permission}) :
+                                originalQuery(parameters)
+                        );
+                    """
+                })
+            except Exception:
+                pass
+
+        # 时区/地理位置模拟（可选）
+        self._apply_emulation()
+
     def _run_flow(self, email: str, mail_client) -> dict:
         """执行登录流程"""
 
@@ -119,7 +167,7 @@ class GeminiAutomationUC:
 
         # 访问登录页面
         self.driver.get(LOGIN_URL)
-        time.sleep(3)
+        self._sleep(3)
 
         # 检查当前页面状态
         current_url = self.driver.current_url
@@ -139,7 +187,7 @@ class GeminiAutomationUC:
             for char in email:
                 email_input.send_keys(char)
                 time.sleep(0.02)
-            time.sleep(0.5)
+            self._sleep(0.5)
         except Exception as e:
             self._log("error", f"failed to enter email: {e}")
             self._save_screenshot("email_input_failed")
@@ -151,7 +199,7 @@ class GeminiAutomationUC:
                 EC.element_to_be_clickable((By.XPATH, "/html/body/c-wiz/div/div/div[1]/div/div/div/form/div[2]/div/button"))
             )
             self.driver.execute_script("arguments[0].click();", continue_btn)
-            time.sleep(2)
+            self._sleep(2)
         except Exception as e:
             self._log("error", f"failed to click continue: {e}")
             self._save_screenshot("continue_button_failed")
@@ -183,13 +231,13 @@ class GeminiAutomationUC:
         self._log("info", f"code received: {code}")
 
         # 输入验证码
-        time.sleep(1)
+        self._sleep(1)
         try:
             code_input = WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='pinInput']"))
             )
             code_input.click()
-            time.sleep(0.1)
+            self._sleep(0.1)
             for char in code:
                 code_input.send_keys(char)
                 time.sleep(0.05)
@@ -197,7 +245,7 @@ class GeminiAutomationUC:
             try:
                 span = self.driver.find_element(By.CSS_SELECTOR, "span[data-index='0']")
                 span.click()
-                time.sleep(0.2)
+                self._sleep(0.2)
                 self.driver.switch_to.active_element.send_keys(code)
             except Exception as e:
                 self._log("error", f"failed to input code: {e}")
@@ -205,7 +253,7 @@ class GeminiAutomationUC:
                 return {"success": False, "error": f"failed to input code: {e}"}
 
         # 点击验证按钮
-        time.sleep(0.5)
+        self._sleep(0.5)
         try:
             verify_btn = self.driver.find_element(By.XPATH, "/html/body/c-wiz/div/div/div[1]/div/div/div/form/div[2]/div/div[1]/span/div[1]/button")
             self.driver.execute_script("arguments[0].click();", verify_btn)
@@ -219,7 +267,7 @@ class GeminiAutomationUC:
             except Exception as e:
                 self._log("warning", f"failed to click verify button: {e}")
 
-        time.sleep(5)
+        self._sleep(5)
 
         # 处理协议页面
         self._handle_agreement_page()
@@ -227,19 +275,19 @@ class GeminiAutomationUC:
         # 导航到业务页面并等待参数生成
         self._log("info", "navigating to business page")
         self.driver.get("https://business.gemini.google/")
-        time.sleep(3)
+        self._sleep(3)
 
         # 处理用户名设置
         if "cid" not in self.driver.current_url:
             if self._handle_username_setup():
-                time.sleep(3)
+                self._sleep(3)
 
         # 等待 URL 参数生成（csesidx 和 cid）
         self._log("info", "waiting for URL parameters")
         if not self._wait_for_business_params():
             self._log("warning", "URL parameters not generated, trying refresh")
             self.driver.refresh()
-            time.sleep(3)
+            self._sleep(3)
             if not self._wait_for_business_params():
                 self._log("error", "URL parameters generation failed")
                 self._save_screenshot("params_missing")
@@ -251,7 +299,7 @@ class GeminiAutomationUC:
 
     def _click_send_code_button(self) -> bool:
         """点击发送验证码按钮（如果需要）"""
-        time.sleep(2)
+        self._sleep(2)
 
         # 方法1: 直接通过ID查找
         try:
@@ -259,7 +307,7 @@ class GeminiAutomationUC:
                 EC.element_to_be_clickable((By.ID, "sign-in-with-email"))
             )
             self.driver.execute_script("arguments[0].click();", direct_btn)
-            time.sleep(2)
+            self._sleep(2)
             return True
         except TimeoutException:
             pass
@@ -272,7 +320,7 @@ class GeminiAutomationUC:
                 text = btn.text.strip() if btn.text else ""
                 if text and any(kw in text for kw in keywords):
                     self.driver.execute_script("arguments[0].click();", btn)
-                    time.sleep(2)
+                    self._sleep(2)
                     return True
         except Exception:
             pass
@@ -330,7 +378,7 @@ class GeminiAutomationUC:
                     EC.element_to_be_clickable((By.CSS_SELECTOR, "button.agree-button"))
                 )
                 agree_btn.click()
-                time.sleep(2)
+                self._sleep(2)
             except TimeoutException:
                 pass
 
@@ -339,7 +387,7 @@ class GeminiAutomationUC:
         for _ in range(timeout):
             if "cid" in self.driver.current_url:
                 return True
-            time.sleep(1)
+            self._sleep(1)
         return False
 
     def _wait_for_business_params(self, timeout: int = 30) -> bool:
@@ -349,7 +397,7 @@ class GeminiAutomationUC:
             if "csesidx=" in url and "/cid/" in url:
                 self._log("info", f"business params ready: {url}")
                 return True
-            time.sleep(1)
+            self._sleep(1)
         return False
 
     def _handle_username_setup(self) -> bool:
@@ -379,7 +427,7 @@ class GeminiAutomationUC:
                     continue
             if username_input and username_input.is_displayed():
                 break
-            time.sleep(1)
+            self._sleep(1)
 
         if not username_input or not username_input.is_displayed():
             return False
@@ -389,16 +437,16 @@ class GeminiAutomationUC:
 
         try:
             username_input.click()
-            time.sleep(0.2)
+            self._sleep(0.2)
             username_input.clear()
             for char in username:
                 username_input.send_keys(char)
                 time.sleep(0.02)
-            time.sleep(0.3)
+            self._sleep(0.3)
 
             from selenium.webdriver.common.keys import Keys
             username_input.send_keys(Keys.ENTER)
-            time.sleep(1)
+            self._sleep(1)
 
             return True
         except Exception:
@@ -409,7 +457,7 @@ class GeminiAutomationUC:
         try:
             if "cid/" not in self.driver.current_url:
                 self.driver.get("https://business.gemini.google/")
-                time.sleep(3)
+                self._sleep(3)
 
             url = self.driver.current_url
             if "cid/" not in url:
@@ -464,6 +512,45 @@ class GeminiAutomationUC:
                 self.driver.quit()
             except Exception:
                 pass
+
+    def _apply_emulation(self) -> None:
+        """设置时区与地理位置（CDP）"""
+        if not self.driver:
+            return
+
+        if self.timezone:
+            try:
+                self.driver.execute_cdp_cmd("Emulation.setTimezoneOverride", {"timezoneId": self.timezone})
+            except Exception:
+                pass
+
+        if self.geo_latitude is not None and self.geo_longitude is not None:
+            try:
+                self.driver.execute_cdp_cmd("Emulation.setGeolocationOverride", {
+                    "latitude": float(self.geo_latitude),
+                    "longitude": float(self.geo_longitude),
+                    "accuracy": float(self.geo_accuracy or 50),
+                })
+                try:
+                    self.driver.execute_cdp_cmd("Browser.grantPermissions", {
+                        "origin": "https://auth.business.gemini.google",
+                        "permissions": ["geolocation"]
+                    })
+                    self.driver.execute_cdp_cmd("Browser.grantPermissions", {
+                        "origin": "https://business.gemini.google",
+                        "permissions": ["geolocation"]
+                    })
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    def _sleep(self, base_seconds: float) -> None:
+        """随机化等待时间"""
+        extra = 0.0
+        if self.random_delay_max_ms > 0:
+            extra = random.uniform(self.random_delay_min_ms, self.random_delay_max_ms) / 1000.0
+        time.sleep(max(0, base_seconds) + extra)
 
         if self.user_data_dir:
             try:

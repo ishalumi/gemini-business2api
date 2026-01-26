@@ -200,6 +200,14 @@ class LoginService(BaseTaskService[LoginTask]):
                 user_agent=self.user_agent,
                 proxy=config.basic.proxy_for_auth,
                 headless=headless,
+                stealth_enabled=config.automation.stealth_enabled,
+                webrtc_protect=config.automation.webrtc_protect,
+                timezone=config.automation.timezone,
+                geo_latitude=config.automation.geo_latitude,
+                geo_longitude=config.automation.geo_longitude,
+                geo_accuracy=config.automation.geo_accuracy,
+                random_delay_min_ms=config.automation.random_delay_min_ms,
+                random_delay_max_ms=config.automation.random_delay_max_ms,
                 log_callback=log_cb,
             )
         else:
@@ -211,6 +219,14 @@ class LoginService(BaseTaskService[LoginTask]):
                 user_agent=self.user_agent,
                 proxy=config.basic.proxy_for_auth,
                 headless=headless,
+                stealth_enabled=config.automation.stealth_enabled,
+                webrtc_protect=config.automation.webrtc_protect,
+                timezone=config.automation.timezone,
+                geo_latitude=config.automation.geo_latitude,
+                geo_longitude=config.automation.geo_longitude,
+                geo_accuracy=config.automation.geo_accuracy,
+                random_delay_min_ms=config.automation.random_delay_min_ms,
+                random_delay_max_ms=config.automation.random_delay_max_ms,
                 log_callback=log_cb,
             )
         # 允许外部取消时立刻关闭浏览器

@@ -99,6 +99,18 @@ export interface Settings {
     session_cache_ttl_seconds: number
     auto_refresh_accounts_seconds: number
   }
+  automation: {
+    stealth_enabled: boolean
+    webrtc_protect: boolean
+    timezone?: string
+    geo_latitude?: number | null
+    geo_longitude?: number | null
+    geo_accuracy?: number
+    random_delay_min_ms: number
+    random_delay_max_ms: number
+    between_account_min_seconds: number
+    between_account_max_seconds: number
+  }
   public_display: {
     logo_url?: string
     chat_url?: string

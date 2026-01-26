@@ -1661,6 +1661,18 @@ async def admin_get_settings(request: Request):
             "session_cache_ttl_seconds": config.retry.session_cache_ttl_seconds,
             "auto_refresh_accounts_seconds": config.retry.auto_refresh_accounts_seconds
         },
+        "automation": {
+            "stealth_enabled": config.automation.stealth_enabled,
+            "webrtc_protect": config.automation.webrtc_protect,
+            "timezone": config.automation.timezone,
+            "geo_latitude": config.automation.geo_latitude,
+            "geo_longitude": config.automation.geo_longitude,
+            "geo_accuracy": config.automation.geo_accuracy,
+            "random_delay_min_ms": config.automation.random_delay_min_ms,
+            "random_delay_max_ms": config.automation.random_delay_max_ms,
+            "between_account_min_seconds": config.automation.between_account_min_seconds,
+            "between_account_max_seconds": config.automation.between_account_max_seconds
+        },
         "public_display": {
             "logo_url": config.public_display.logo_url,
             "chat_url": config.public_display.chat_url
@@ -1712,6 +1724,19 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         retry = dict(new_settings.get("retry") or {})
         retry.setdefault("auto_refresh_accounts_seconds", config.retry.auto_refresh_accounts_seconds)
         new_settings["retry"] = retry
+
+        automation = dict(new_settings.get("automation") or {})
+        automation.setdefault("stealth_enabled", config.automation.stealth_enabled)
+        automation.setdefault("webrtc_protect", config.automation.webrtc_protect)
+        automation.setdefault("timezone", config.automation.timezone)
+        automation.setdefault("geo_latitude", config.automation.geo_latitude)
+        automation.setdefault("geo_longitude", config.automation.geo_longitude)
+        automation.setdefault("geo_accuracy", config.automation.geo_accuracy)
+        automation.setdefault("random_delay_min_ms", config.automation.random_delay_min_ms)
+        automation.setdefault("random_delay_max_ms", config.automation.random_delay_max_ms)
+        automation.setdefault("between_account_min_seconds", config.automation.between_account_min_seconds)
+        automation.setdefault("between_account_max_seconds", config.automation.between_account_max_seconds)
+        new_settings["automation"] = automation
 
         # 保存旧配置用于对比
         old_proxy_for_auth = PROXY_FOR_AUTH

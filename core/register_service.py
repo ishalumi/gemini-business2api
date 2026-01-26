@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import time
+import random
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -116,6 +117,18 @@ class RegisterService(BaseTaskService[RegisterTask]):
                 error = result.get('error', '未知错误')
                 self._append_log(task, "error", f"❌ 注册失败: {error}")
 
+            # 账号注册间隔（降低频率/随机化节奏）
+            if idx < task.count - 1:
+                delay_min = config.automation.between_account_min_seconds
+                delay_max = config.automation.between_account_max_seconds
+                if delay_max > 0:
+                    delay_min = max(0, int(delay_min))
+                    delay_max = max(delay_min, int(delay_max))
+                    sleep_seconds = random.uniform(delay_min, delay_max)
+                    if sleep_seconds > 0:
+                        self._append_log(task, "info", f"⏳ 休眠 {sleep_seconds:.1f} 秒后继续注册")
+                        await asyncio.sleep(sleep_seconds)
+
         if task.cancel_requested:
             task.status = TaskStatus.CANCELLED
         else:
@@ -158,6 +171,14 @@ class RegisterService(BaseTaskService[RegisterTask]):
                 user_agent=self.user_agent,
                 proxy=config.basic.proxy_for_auth,
                 headless=headless,
+                stealth_enabled=config.automation.stealth_enabled,
+                webrtc_protect=config.automation.webrtc_protect,
+                timezone=config.automation.timezone,
+                geo_latitude=config.automation.geo_latitude,
+                geo_longitude=config.automation.geo_longitude,
+                geo_accuracy=config.automation.geo_accuracy,
+                random_delay_min_ms=config.automation.random_delay_min_ms,
+                random_delay_max_ms=config.automation.random_delay_max_ms,
                 log_callback=log_cb,
             )
         else:
@@ -169,6 +190,14 @@ class RegisterService(BaseTaskService[RegisterTask]):
                 user_agent=self.user_agent,
                 proxy=config.basic.proxy_for_auth,
                 headless=headless,
+                stealth_enabled=config.automation.stealth_enabled,
+                webrtc_protect=config.automation.webrtc_protect,
+                timezone=config.automation.timezone,
+                geo_latitude=config.automation.geo_latitude,
+                geo_longitude=config.automation.geo_longitude,
+                geo_accuracy=config.automation.geo_accuracy,
+                random_delay_min_ms=config.automation.random_delay_min_ms,
+                random_delay_max_ms=config.automation.random_delay_max_ms,
                 log_callback=log_cb,
             )
         # 允许外部取消时立刻关闭浏览器

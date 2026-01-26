@@ -128,6 +128,100 @@
               </div>
             </div>
 
+            <div class="rounded-2xl border border-border bg-card p-4">
+              <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">自动化反检测</p>
+              <div class="mt-4 space-y-3">
+                <div class="grid grid-cols-2 items-center gap-x-6 gap-y-2">
+                  <Checkbox v-model="localSettings.automation.stealth_enabled">
+                    启用反检测脚本
+                  </Checkbox>
+                  <div class="flex items-center justify-end gap-2">
+                    <Checkbox v-model="localSettings.automation.webrtc_protect">
+                      禁用 WebRTC 泄露
+                    </Checkbox>
+                    <HelpTip text="强制 WebRTC 走代理，避免本机 IP 泄露" />
+                  </div>
+                </div>
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>浏览器时区</span>
+                  <HelpTip text="留空表示不覆盖，例如 America/Los_Angeles" />
+                </div>
+                <input
+                  v-model="localSettings.automation.timezone"
+                  type="text"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="America/Los_Angeles"
+                />
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>地理位置（可选）</span>
+                  <HelpTip text="需同时填写经纬度，精度单位为米" />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <input
+                    v-model.number="localSettings.automation.geo_latitude"
+                    type="number"
+                    step="0.0001"
+                    class="rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="纬度"
+                  />
+                  <input
+                    v-model.number="localSettings.automation.geo_longitude"
+                    type="number"
+                    step="0.0001"
+                    class="rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="经度"
+                  />
+                  <input
+                    v-model.number="localSettings.automation.geo_accuracy"
+                    type="number"
+                    min="1"
+                    class="col-span-2 rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="精度（米），如 50"
+                  />
+                </div>
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>随机延迟（毫秒）</span>
+                  <HelpTip text="用于点击/跳转等操作的随机等待区间" />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <input
+                    v-model.number="localSettings.automation.random_delay_min_ms"
+                    type="number"
+                    min="0"
+                    class="rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="最小值"
+                  />
+                  <input
+                    v-model.number="localSettings.automation.random_delay_max_ms"
+                    type="number"
+                    min="0"
+                    class="rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="最大值"
+                  />
+                </div>
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>注册账号间隔（秒）</span>
+                  <HelpTip text="批量注册时每个账号之间的随机等待区间" />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <input
+                    v-model.number="localSettings.automation.between_account_min_seconds"
+                    type="number"
+                    min="0"
+                    class="rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="最小值"
+                  />
+                  <input
+                    v-model.number="localSettings.automation.between_account_max_seconds"
+                    type="number"
+                    min="0"
+                    class="rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="最大值"
+                  />
+                </div>
+              </div>
+            </div>
+
           </div>
 
           <div class="space-y-4">
@@ -332,6 +426,33 @@ watch(settings, (value) => {
   next.basic.duckmail_api_key = typeof next.basic.duckmail_api_key === 'string'
     ? next.basic.duckmail_api_key
     : ''
+  next.automation = next.automation || {}
+  next.automation.stealth_enabled = next.automation.stealth_enabled ?? true
+  next.automation.webrtc_protect = next.automation.webrtc_protect ?? true
+  next.automation.timezone = typeof next.automation.timezone === 'string'
+    ? next.automation.timezone
+    : ''
+  next.automation.geo_latitude = Number.isFinite(next.automation.geo_latitude)
+    ? next.automation.geo_latitude
+    : null
+  next.automation.geo_longitude = Number.isFinite(next.automation.geo_longitude)
+    ? next.automation.geo_longitude
+    : null
+  next.automation.geo_accuracy = Number.isFinite(next.automation.geo_accuracy)
+    ? next.automation.geo_accuracy
+    : 50
+  next.automation.random_delay_min_ms = Number.isFinite(next.automation.random_delay_min_ms)
+    ? next.automation.random_delay_min_ms
+    : 120
+  next.automation.random_delay_max_ms = Number.isFinite(next.automation.random_delay_max_ms)
+    ? next.automation.random_delay_max_ms
+    : 380
+  next.automation.between_account_min_seconds = Number.isFinite(next.automation.between_account_min_seconds)
+    ? next.automation.between_account_min_seconds
+    : 0
+  next.automation.between_account_max_seconds = Number.isFinite(next.automation.between_account_max_seconds)
+    ? next.automation.between_account_max_seconds
+    : 0
   next.retry = next.retry || {}
   next.retry.auto_refresh_accounts_seconds = Number.isFinite(next.retry.auto_refresh_accounts_seconds)
     ? next.retry.auto_refresh_accounts_seconds
