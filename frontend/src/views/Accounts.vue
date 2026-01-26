@@ -1784,6 +1784,9 @@ const handleConfigImportFile = async (event: Event) => {
     return
   }
 
+  closeConfigPanel()
+  await nextTick()
+
   const mergeMode = await confirmDialog.ask({
     title: '导入账户配置',
     message: '请选择导入方式：\n确认=合并（同ID覆盖，新增追加）\n取消=覆盖（完全替换现有配置）',
