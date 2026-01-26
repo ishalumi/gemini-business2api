@@ -26,11 +26,12 @@ export const accountsApi = {
     apiClient.get<never, Blob>('/admin/accounts-config/export', { responseType: 'blob' as any }),
 
   // 导入账户配置（JSON文件）
-  importConfigFile: (file: File, mode: 'merge' | 'replace' = 'merge') => {
+  importConfigFile: (file: File, mode: 'merge' | 'replace' = 'merge', confirmReplace = false) => {
     const form = new FormData()
     form.append('file', file)
+    const confirmQuery = mode === 'replace' && confirmReplace ? '&confirm=yes' : ''
     return apiClient.post<FormData, AccountsConfigImportResponse>(
-      `/admin/accounts-config/import?mode=${mode}`,
+      `/admin/accounts-config/import?mode=${mode}${confirmQuery}`,
       form,
       { headers: { 'Content-Type': 'multipart/form-data' } }
     )

@@ -1169,6 +1169,7 @@ async def admin_export_accounts_config(request: Request):
 async def admin_import_accounts_config(
     request: Request,
     mode: str = Query(default="merge", description="导入模式：merge=合并，replace=覆盖"),
+    confirm: Optional[str] = Query(default=None, description="二次确认：覆盖导入需 confirm=yes"),
     file: UploadFile = File(default=None),
     payload: object = Body(default=None),
 ):
@@ -1177,6 +1178,8 @@ async def admin_import_accounts_config(
 
     if mode not in ("merge", "replace"):
         raise HTTPException(400, "mode 只能是 merge 或 replace")
+    if mode == "replace" and confirm != "yes":
+        raise HTTPException(400, "覆盖导入需要二次确认：请添加 confirm=yes")
 
     # 读取输入数据
     incoming = None

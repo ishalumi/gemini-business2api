@@ -1775,16 +1775,32 @@ const handleConfigImportFile = async (event: Event) => {
 
   const mergeMode = await confirmDialog.ask({
     title: '导入账户配置',
-    message: '是否以“合并导入”方式导入？\n确认=合并（同ID覆盖，新增追加）\n取消=覆盖（完全替换现有配置）',
+    message: '请选择导入方式：\n确认=合并（同ID覆盖，新增追加）\n取消=覆盖（完全替换现有配置）',
     confirmText: '合并导入',
     cancelText: '覆盖导入',
   })
-  const mode = mergeMode ? 'merge' : 'replace'
+
+  let mode: 'merge' | 'replace' = 'merge'
+  let confirmReplace = false
+  if (mergeMode) {
+    mode = 'merge'
+  } else {
+    // 覆盖导入二次确认：避免误触导致全量丢失
+    const confirmed = await confirmDialog.ask({
+      title: '二次确认：覆盖导入',
+      message: '覆盖导入会完全替换当前账户配置（可能导致现有账号丢失）。\n确定继续吗？',
+      confirmText: '确认覆盖',
+      cancelText: '取消',
+    })
+    if (!confirmed) return
+    mode = 'replace'
+    confirmReplace = true
+  }
 
   isConfigBusy.value = true
   configError.value = ''
   try {
-    const result = await accountsApi.importConfigFile(file, mode)
+    const result = await accountsApi.importConfigFile(file, mode, confirmReplace)
     toast.success(`导入成功：新增 ${result.added}，更新 ${result.updated}，总计 ${result.total}`)
 
     // 刷新列表与配置面板数据（导入后优先保持脱敏展示，避免敏感信息直接展示）
