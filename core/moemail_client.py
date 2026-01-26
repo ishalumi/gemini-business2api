@@ -14,7 +14,7 @@ class MoeMailClient:
 
     def __init__(
         self,
-        base_url: str = "https://mail.ishalumi.me",
+        base_url: str = "",
         api_key: str = "",
         proxy: str = "",
         verify_ssl: bool = True,

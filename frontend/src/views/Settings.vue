@@ -160,7 +160,7 @@
                   v-model="localSettings.basic.moemail_base_url"
                   type="text"
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="https://mail.ishalumi.me"
+                  placeholder="https://example.com"
                 />
                 <input
                   v-model="localSettings.basic.moemail_api_key"
@@ -500,7 +500,7 @@ watch(settings, (value) => {
     : ''
   next.basic.moemail_base_url = typeof next.basic.moemail_base_url === 'string'
     ? next.basic.moemail_base_url
-    : 'https://mail.ishalumi.me'
+    : ''
   next.basic.moemail_api_key = typeof next.basic.moemail_api_key === 'string'
     ? next.basic.moemail_api_key
     : ''
