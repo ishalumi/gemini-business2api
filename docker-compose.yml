@@ -6,6 +6,8 @@ services:
       - "7860:7860"
     volumes:
       - ./data:/app/data
+      - ./main.py:/app/main.py
+      - ./core:/app/core
     env_file:
       - .env
     restart: unless-stopped
