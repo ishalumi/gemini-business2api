@@ -129,7 +129,10 @@ class BaseTaskService(Generic[T]):
         if self._current_task_id:
             current = self._tasks.get(self._current_task_id)
             if current:
-                return current
+                # 防御性处理：如果 current_task_id 指向的任务已结束，不应再作为“当前任务”暴露给前端
+                if current.status in (TaskStatus.RUNNING, TaskStatus.PENDING):
+                    return current
+                self._current_task_id = None
         # 若当前无运行任务，返回队列中最早的 pending 任务（用于前端显示“等待中”）
         for task_id in list(self._pending_task_ids):
             task = self._tasks.get(task_id)

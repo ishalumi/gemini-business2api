@@ -1162,6 +1162,17 @@ const cleanupCancelledTasks = () => {
   }
 }
 
+const cleanupFinishedTasks = () => {
+  const regStatus = registerTask.value?.status
+  if (regStatus && regStatus !== 'running' && regStatus !== 'pending') {
+    syncRegisterTask(null, true)
+  }
+  const loginStatus = loginTask.value?.status
+  if (loginStatus && loginStatus !== 'running' && loginStatus !== 'pending') {
+    syncLoginTask(null, true)
+  }
+}
+
 const openRegisterModal = () => {
   isRegisterOpen.value = true
   addMode.value = 'register'
@@ -1346,8 +1357,8 @@ const openTaskModal = async () => {
 
 const closeTaskModal = () => {
   isTaskOpen.value = false
-  // 关闭弹窗时，确保已中断任务不会被缓存“复活”
-  cleanupCancelledTasks()
+  // 关闭弹窗时，清理已结束任务（避免“任务已结束但仍残留状态/红点”）
+  cleanupFinishedTasks()
 }
 
 const clearTaskLogs = () => {
@@ -2016,11 +2027,8 @@ const updateRegisterTask = async (taskId: string) => {
     clearRegisterTimer()
     await refreshAccounts()
 
-    if (task.status === 'cancelled') {
-      // 已中断：不再在任务窗口中展示该任务
-      syncRegisterTask(null, true)
-      return
-    }
+    // 任务已结束：不再长期在任务窗口中展示该任务，避免残留状态影响操作体验
+    syncRegisterTask(null, true)
 
     // 显示任务完成通知
     const successCount = task.success_count || 0
@@ -2057,11 +2065,8 @@ const updateLoginTask = async (taskId: string) => {
     clearLoginTimer()
     await refreshAccounts()
 
-    if (task.status === 'cancelled') {
-      // 已中断：不再在任务窗口中展示该任务
-      syncLoginTask(null, true)
-      return
-    }
+    // 任务已结束：不再长期在任务窗口中展示该任务，避免残留状态影响操作体验
+    syncLoginTask(null, true)
 
     // 显示任务完成通知
     const successCount = task.success_count || 0
@@ -2127,10 +2132,16 @@ const loadCurrentTasks = async () => {
       if (registerCurrent.status === 'running' || registerCurrent.status === 'pending') {
         isRegistering.value = true
         startRegisterPolling(registerCurrent.id)
+      } else {
+        isRegistering.value = false
+        clearRegisterTimer()
+        syncRegisterTask(null, true)
       }
     } else {
       // 后端 idle 时，清理已中断的缓存
-      cleanupCancelledTasks()
+      isRegistering.value = false
+      clearRegisterTimer()
+      cleanupFinishedTasks()
     }
   } catch (error: any) {
     // 部分后端实现可能在无任务时返回 404：视为 idle，不提示 "Not found"
@@ -2151,10 +2162,16 @@ const loadCurrentTasks = async () => {
       if (loginCurrent.status === 'running' || loginCurrent.status === 'pending') {
         isRefreshing.value = true
         startLoginPolling(loginCurrent.id)
+      } else {
+        isRefreshing.value = false
+        clearLoginTimer()
+        syncLoginTask(null, true)
       }
     } else {
       // 后端 idle 时，清理已中断的缓存
-      cleanupCancelledTasks()
+      isRefreshing.value = false
+      clearLoginTimer()
+      cleanupFinishedTasks()
     }
   } catch (error: any) {
     // 部分后端实现可能在无任务时返回 404：视为 idle，不提示 "Not found"
