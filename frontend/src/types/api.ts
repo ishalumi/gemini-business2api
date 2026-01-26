@@ -55,6 +55,15 @@ export interface AccountsConfigResponse {
   accounts: AccountConfigItem[]
 }
 
+export interface AccountsConfigImportResponse {
+  status: string
+  mode: 'merge' | 'replace'
+  added: number
+  updated: number
+  total: number
+  message?: string
+}
+
 export interface Stats {
   total_accounts: number
   active_accounts: number

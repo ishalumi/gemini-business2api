@@ -7,9 +7,9 @@ from dotenv import load_dotenv
 
 import httpx
 import aiofiles
-from fastapi import FastAPI, HTTPException, Header, Request, Body, Form
+from fastapi import FastAPI, HTTPException, Header, Request, Body, Form, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from util.streaming_parser import parse_json_array_stream_async
@@ -1136,6 +1136,126 @@ async def admin_update_config(request: Request, accounts_data: list = Body(...))
     except Exception as e:
         logger.error(f"[CONFIG] 更新配置失败: {str(e)}")
         raise HTTPException(500, f"更新失败: {str(e)}")
+
+
+@app.get("/admin/accounts-config/export")
+@require_login()
+async def admin_export_accounts_config(request: Request):
+    """导出账户配置（JSON文件下载）"""
+    try:
+        accounts_data = load_accounts_from_source()
+        payload = {
+            "version": 1,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "accounts": accounts_data,
+        }
+        content = json.dumps(payload, ensure_ascii=False, indent=2)
+        filename = f"accounts-config-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
+    except Exception as e:
+        logger.error(f"[CONFIG] 导出配置失败: {str(e)}")
+        raise HTTPException(500, f"导出失败: {str(e)}")
+
+
+@app.post("/admin/accounts-config/import")
+@require_login()
+async def admin_import_accounts_config(
+    request: Request,
+    mode: str = Query(default="merge", description="导入模式：merge=合并，replace=覆盖"),
+    file: UploadFile = File(default=None),
+    payload: object = Body(default=None),
+):
+    """导入账户配置（支持上传JSON文件或直接传JSON）"""
+    global multi_account_mgr
+
+    if mode not in ("merge", "replace"):
+        raise HTTPException(400, "mode 只能是 merge 或 replace")
+
+    # 读取输入数据
+    incoming = None
+    if file is not None:
+        raw = await file.read()
+        try:
+            incoming = json.loads(raw.decode("utf-8"))
+        except Exception:
+            # 兼容 UTF-8 BOM
+            try:
+                incoming = json.loads(raw.decode("utf-8-sig"))
+            except Exception as e:
+                raise HTTPException(400, f"配置文件不是有效的 JSON: {str(e)[:120]}")
+    elif payload is not None:
+        incoming = payload
+    else:
+        raise HTTPException(400, "缺少导入内容（请上传 file 或传入 JSON body）")
+
+    # 兼容两种结构：[{...}, ...] 或 {"accounts":[...], ...}
+    if isinstance(incoming, dict) and "accounts" in incoming:
+        accounts_in = incoming.get("accounts")
+    else:
+        accounts_in = incoming
+
+    if not isinstance(accounts_in, list):
+        raise HTTPException(400, "导入内容格式错误：应为 accounts 数组或数组JSON")
+
+    # 基础校验：必须有 id
+    normalized: List[dict] = []
+    for idx, item in enumerate(accounts_in, 1):
+        if not isinstance(item, dict):
+            raise HTTPException(400, f"第 {idx} 项格式错误：必须是对象")
+        acc_id = item.get("id")
+        if not isinstance(acc_id, str) or not acc_id.strip():
+            raise HTTPException(400, f"第 {idx} 项缺少有效的 id 字段")
+        normalized.append(item)
+
+    try:
+        current = load_accounts_from_source()
+        added = 0
+        updated = 0
+
+        if mode == "replace":
+            merged = normalized
+        else:
+            merged = list(current or [])
+            index_map = {}
+            for i, acc in enumerate(merged):
+                if isinstance(acc, dict) and acc.get("id"):
+                    index_map[str(acc.get("id"))] = i
+
+            for item in normalized:
+                acc_id = str(item.get("id"))
+                if acc_id in index_map:
+                    merged[index_map[acc_id]] = item
+                    updated += 1
+                else:
+                    merged.append(item)
+                    added += 1
+
+        multi_account_mgr = _update_accounts_config(
+            merged, multi_account_mgr, http_client, USER_AGENT,
+            ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS,
+            SESSION_CACHE_TTL_SECONDS, global_stats
+        )
+
+        return {
+            "status": "success",
+            "mode": mode,
+            "added": added,
+            "updated": updated,
+            "total": len(merged),
+            "message": "配置导入成功",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[CONFIG] 导入配置失败: {str(e)}")
+        raise HTTPException(500, f"导入失败: {str(e)}")
 
 @app.post("/admin/register/start")
 @require_login()

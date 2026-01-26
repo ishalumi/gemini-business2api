@@ -790,10 +790,34 @@
         <div class="flex items-center justify-between">
           <p class="text-sm font-medium text-foreground">账户配置（JSON）</p>
           <div class="flex items-center gap-2">
+            <input
+              ref="configImportInputRef"
+              type="file"
+              accept="application/json,.json"
+              class="hidden"
+              @change="handleConfigImportFile"
+            />
+            <button
+              class="rounded-full border border-border px-3 py-1 text-xs text-foreground transition-colors
+                     hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="isConfigBusy"
+              @click="exportConfigFile"
+            >
+              导出
+            </button>
+            <button
+              class="rounded-full border border-border px-3 py-1 text-xs text-foreground transition-colors
+                     hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="isConfigBusy"
+              @click="triggerConfigImport"
+            >
+              导入
+            </button>
             <button
               class="rounded-full bg-foreground px-3 py-1 text-xs text-background transition-opacity
                      hover:opacity-90"
               @click="toggleConfigMask"
+              :disabled="isConfigBusy"
             >
               {{ configMasked ? '显示原文' : '脱敏显示' }}
             </button>
@@ -824,6 +848,7 @@
             class="rounded-full border border-border px-4 py-2 text-sm text-muted-foreground transition-colors
                    hover:border-primary hover:text-primary"
             @click="closeConfigPanel"
+            :disabled="isConfigBusy"
           >
             取消
           </button>
@@ -831,7 +856,7 @@
             class="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity
                    hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             @click="saveConfigPanel"
-            :disabled="configMasked"
+            :disabled="configMasked || isConfigBusy"
           >
             保存
           </button>
@@ -873,6 +898,8 @@ const configError = ref('')
 const configJson = ref('')
 const configMasked = ref(false)
 const configData = ref<AccountConfigItem[]>([])
+const isConfigBusy = ref(false)
+const configImportInputRef = ref<HTMLInputElement | null>(null)
 const registerCount = ref(1)
 const isRegisterOpen = ref(false)
 const addMode = ref<'register' | 'import'>('register')
@@ -1689,8 +1716,10 @@ const toggleConfigMask = () => {
 }
 
 const saveConfigPanel = async () => {
+  if (isConfigBusy.value) return
   configError.value = ''
   try {
+    isConfigBusy.value = true
     const parsed = getConfigFromEditor()
     await accountsStore.updateConfig(parsed)
     toast.success('配置保存成功')
@@ -1698,6 +1727,77 @@ const saveConfigPanel = async () => {
   } catch (error: any) {
     configError.value = error.message || '保存失败'
     toast.error(error.message || '保存失败')
+  } finally {
+    isConfigBusy.value = false
+  }
+}
+
+const exportConfigFile = async () => {
+  if (isConfigBusy.value) return
+  configError.value = ''
+  isConfigBusy.value = true
+  try {
+    const blob = await accountsApi.exportConfigFile()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `accounts-config-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    toast.success('配置已导出')
+  } catch (error: any) {
+    configError.value = error.message || '导出失败'
+    toast.error(error.message || '导出失败')
+  } finally {
+    isConfigBusy.value = false
+  }
+}
+
+const triggerConfigImport = () => {
+  if (isConfigBusy.value) return
+  configError.value = ''
+  configImportInputRef.value?.click()
+}
+
+const handleConfigImportFile = async (event: Event) => {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0] || null
+  if (input) input.value = ''
+  if (!file) return
+
+  const isJson = file.type === 'application/json' || file.name.toLowerCase().endsWith('.json')
+  if (!isJson) {
+    toast.error('请选择 JSON 配置文件（.json）')
+    return
+  }
+
+  const mergeMode = await confirmDialog.ask({
+    title: '导入账户配置',
+    message: '是否以“合并导入”方式导入？\n确认=合并（同ID覆盖，新增追加）\n取消=覆盖（完全替换现有配置）',
+    confirmText: '合并导入',
+    cancelText: '覆盖导入',
+  })
+  const mode = mergeMode ? 'merge' : 'replace'
+
+  isConfigBusy.value = true
+  configError.value = ''
+  try {
+    const result = await accountsApi.importConfigFile(file, mode)
+    toast.success(`导入成功：新增 ${result.added}，更新 ${result.updated}，总计 ${result.total}`)
+
+    // 刷新列表与配置面板数据（导入后优先保持脱敏展示，避免敏感信息直接展示）
+    await refreshAccounts()
+    const response = await accountsApi.getConfig()
+    configData.value = Array.isArray(response.accounts) ? response.accounts : []
+    configJson.value = JSON.stringify(maskConfig(configData.value), null, 2)
+    configMasked.value = true
+  } catch (error: any) {
+    configError.value = error.message || '导入失败'
+    toast.error(error.message || '导入失败')
+  } finally {
+    isConfigBusy.value = false
   }
 }
 

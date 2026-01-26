@@ -3,6 +3,7 @@ import type {
   AccountsConfigResponse,
   AccountsListResponse,
   AccountConfigItem,
+  AccountsConfigImportResponse,
   RegisterTask,
   LoginTask,
 } from '@/types/api'
@@ -19,6 +20,21 @@ export const accountsApi = {
   // 更新账户配置
   updateConfig: (accounts: AccountConfigItem[]) =>
     apiClient.put('/admin/accounts-config', accounts),
+
+  // 导出账户配置（JSON文件）
+  exportConfigFile: () =>
+    apiClient.get<never, Blob>('/admin/accounts-config/export', { responseType: 'blob' as any }),
+
+  // 导入账户配置（JSON文件）
+  importConfigFile: (file: File, mode: 'merge' | 'replace' = 'merge') => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.post<FormData, AccountsConfigImportResponse>(
+      `/admin/accounts-config/import?mode=${mode}`,
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    )
+  },
 
   // 删除账户
   delete: (accountId: string) =>
