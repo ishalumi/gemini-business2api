@@ -733,7 +733,7 @@ async def _security_record_404(ip: str, path: str) -> None:
         _security_404_hits.pop(ip, None)
 
 
-async def _security_record_login_failure(ip: str, username: str = "") -> None:
+async def _security_record_login_failure(ip: str) -> None:
     dq = _security_login_fail_hits.get(ip)
     if dq is None:
         dq = deque()
@@ -747,7 +747,7 @@ async def _security_record_login_failure(ip: str, username: str = "") -> None:
             "登录失败触发封禁阈值",
             ip=ip,
             reason="login_bruteforce",
-            extra=f"hits={len(dq)} username={username}" if username else f"hits={len(dq)}",
+            extra=f"hits={len(dq)}",
         )
         await _security_ban_temp(ip, reason="login_bruteforce")
         _security_login_fail_hits.pop(ip, None)
@@ -1215,9 +1215,8 @@ async def admin_login_post(request: Request, username: str = Form(...), password
                 ip=ip,
                 path=request.url.path,
                 reason="invalid_credentials",
-                extra=f"username={username}",
             )
-            await _security_record_login_failure(ip, username=username)
+            await _security_record_login_failure(ip)
     raise HTTPException(401, "Invalid credentials")
 
 
@@ -2281,25 +2280,8 @@ async def chat_impl(
         await finalize_result("error", 503, "No session created")
         raise HTTPException(503, "No session created")
 
-    # 提取用户消息内容用于日志
-    if req.messages:
-        last_content = req.messages[-1].content
-        if isinstance(last_content, str):
-            # 显示完整消息，但限制在500字符以内
-            if len(last_content) > 500:
-                preview = last_content[:500] + "...(已截断)"
-            else:
-                preview = last_content
-        else:
-            preview = f"[多模态: {len(last_content)}部分]"
-    else:
-        preview = "[空消息]"
-
     # 记录请求基本信息
     logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 收到请求: {req.model} | {len(req.messages)}条消息 | stream={req.stream}")
-
-    # 单独记录用户消息内容（方便查看）
-    logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 用户消息: {preview}")
 
     # 3. 解析请求内容
     try:
@@ -2549,10 +2531,6 @@ async def chat_impl(
     # 非流式请求完成日志
     logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 非流式响应完成")
 
-    # 记录响应内容（限制500字符）
-    response_preview = full_content[:500] + "...(已截断)" if len(full_content) > 500 else full_content
-    logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] AI响应: {response_preview}")
-
     return {
         "id": chat_id,
         "object": "chat.completion",
@@ -2613,9 +2591,6 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
     full_content = ""
     first_response_time = None
 
-    # 记录发送给API的内容
-    text_preview = text_content[:500] + "...(已截断)" if len(text_content) > 500 else text_content
-    logger.info(f"[API] [{account_manager.config.account_id}] [req_{request_id}] 发送内容: {text_preview}")
     if file_ids:
         logger.info(f"[API] [{account_manager.config.account_id}] [req_{request_id}] 附带文件: {len(file_ids)}个")
 
@@ -2912,10 +2887,6 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
         warn_msg = "\n\n⚠️ 未检测到生成文件，可能仍在处理中，请稍后重试。\n\n"
         chunk = create_chunk(chat_id, created_time, model_name, {"content": warn_msg}, None)
         yield f"data: {chunk}\n\n"
-
-    if full_content:
-        response_preview = full_content[:500] + "...(已截断)" if len(full_content) > 500 else full_content
-        logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] AI响应: {response_preview}")
 
     if first_response_time:
         latency_ms = int((first_response_time - start_time) * 1000)
