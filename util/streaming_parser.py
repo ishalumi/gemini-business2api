@@ -1,5 +1,5 @@
 import json
-from typing import Iterator, Dict, Any, Iterable, AsyncIterator
+from typing import Iterator, Dict, Any, Iterable, AsyncIterator, Union
 from itertools import chain
 
 def parse_json_array_stream(line_iterator: Iterable[str]) -> Iterator[Dict[str, Any]]:
@@ -108,7 +108,12 @@ def parse_json_array_stream(line_iterator: Iterable[str]) -> Iterator[Dict[str, 
     if brace_level != 0:
         print(f"警告: JSON流意外结束，括号层级为 {brace_level}，可能数据不完整。")
 
-async def parse_json_array_stream_async(line_iterator: AsyncIterator[str]) -> AsyncIterator[Dict[str, Any]]:
+def _normalize_stream_chunk(chunk: Union[str, bytes]) -> str:
+    if isinstance(chunk, bytes):
+        return chunk.decode("utf-8", errors="ignore")
+    return str(chunk)
+
+async def parse_json_array_stream_async(line_iterator: AsyncIterator[Union[str, bytes]]) -> AsyncIterator[Dict[str, Any]]:
     """
     异步版本：解析一个由文本行组成的、格式化的(pretty-printed)JSON数组流。
 
@@ -135,7 +140,8 @@ async def parse_json_array_stream_async(line_iterator: AsyncIterator[str]) -> As
     in_string = False
     escape_next = False
 
-    async for line in line_iterator:
+    async for raw in line_iterator:
+        line = _normalize_stream_chunk(raw)
         stripped_line = line.strip()
         if not stripped_line:
             continue
@@ -192,7 +198,8 @@ async def parse_json_array_stream_async(line_iterator: AsyncIterator[str]) -> As
         raise ValueError("数据流不是以一个JSON数组 ( '[' ) 开始。")
 
     # 2. 遍历流，逐个字符地构建和解析对象（保持第一行处理后的状态）
-    async for line in line_iterator:
+    async for raw in line_iterator:
+        line = _normalize_stream_chunk(raw)
         for char in line:
             # 处理转义字符
             if escape_next:

@@ -345,21 +345,36 @@ VIRTUAL_MODELS = {
     "gemini-veo": {"videoGenerationSpec": {}},
 }
 
+# 搜索/图片/视频模型集合
+SEARCH_MODELS = {
+    "gemini-2.5-flash-search",
+    "gemini-2.5-pro-search",
+    "gemini-3-flash-preview-search",
+    "gemini-3-pro-preview-search",
+}
+IMAGE_MODELS = set(IMAGE_GENERATION_MODELS) | {"gemini-3-pro-image"}
+VIDEO_MODELS = {"gemini-veo"}
+
 def get_tools_spec(model_name: str) -> dict:
     """根据模型名称返回工具配置"""
-    # 虚拟模型
+    # 虚拟模型（图片/视频）
     if model_name in VIRTUAL_MODELS:
-        return VIRTUAL_MODELS[model_name]
-    
-    # 普通模型
-    tools_spec = {
-        "webGroundingSpec": {},
-        "toolRegistry": "default_tool_registry",
-    }
-    
-    if IMAGE_GENERATION_ENABLED and model_name in IMAGE_GENERATION_MODELS:
+        return {
+            "toolRegistry": "default_tool_registry",
+            **VIRTUAL_MODELS[model_name],
+        }
+
+    tools_spec = {"toolRegistry": "default_tool_registry"}
+
+    if model_name in SEARCH_MODELS:
+        tools_spec["webGroundingSpec"] = {}
+
+    if IMAGE_GENERATION_ENABLED and model_name in IMAGE_MODELS:
         tools_spec["imageGenerationSpec"] = {}
-    
+
+    if model_name in VIDEO_MODELS:
+        tools_spec["videoGenerationSpec"] = {}
+
     return tools_spec
 
 
@@ -379,7 +394,12 @@ MODEL_MAPPING = {
     "gemini-2.5-flash": "gemini-2.5-flash",
     "gemini-2.5-pro": "gemini-2.5-pro",
     "gemini-3-flash-preview": "gemini-3-flash-preview",
-    "gemini-3-pro-preview": "gemini-3-pro-preview"
+    "gemini-3-pro-preview": "gemini-3-pro-preview",
+    "gemini-2.5-flash-search": "gemini-2.5-flash",
+    "gemini-2.5-pro-search": "gemini-2.5-pro",
+    "gemini-3-flash-preview-search": "gemini-3-flash-preview",
+    "gemini-3-pro-preview-search": "gemini-3-pro-preview",
+    "gemini-3-pro-image": "gemini-3-pro-preview",
 }
 
 # ---------- HTTP 客户端 ----------
@@ -2765,7 +2785,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
             async def reader() -> None:
                 nonlocal reader_exc
                 try:
-                    async for json_obj in parse_json_array_stream_async(r.aiter_lines()):
+                    async for json_obj in parse_json_array_stream_async(r.aiter_bytes()):
                         await queue.put(json_obj)
                 except BaseException as exc:
                     reader_exc = exc
