@@ -1260,9 +1260,9 @@ def get_baka_reason(text: str) -> Optional[str]:
     if not normalized:
         return "empty"
     lower = normalized.lower()
-    if any(keyword in lower for keyword in TEST_KEYWORDS):
-        return "keyword"
     if len(normalized) < 10:
+        if any(keyword in lower for keyword in TEST_KEYWORDS):
+            return "keyword"
         return f"short:{len(normalized)}"
     return None
 
