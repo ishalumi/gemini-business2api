@@ -5,7 +5,6 @@ import router from '@/router'
 // 创建 axios 实例
 export const apiClient: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '',
-  timeout: 30000,
   withCredentials: true, // 支持 cookie 认证
 })
 
