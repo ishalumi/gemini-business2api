@@ -341,10 +341,43 @@ class GeminiAutomation:
 
         # Step 7: 等待页面自动重定向（提交验证码后 Google 会自动跳转）
         self._log("info", "⏳ 等待验证后自动跳转...")
-        self._sleep(12)  # 增加等待时间，让页面有足够时间完成重定向（如果网络慢可以继续增加）
+        current_url = page.url
+        max_submit_attempts = 3
+        wait_rounds = 5  # 每次提交后轮询次数
+        wait_interval = 2  # 秒
+
+        for attempt in range(max_submit_attempts):
+            for _ in range(wait_rounds):
+                self._sleep(wait_interval)
+                current_url = page.url
+                if "verify-oob-code" not in current_url:
+                    break
+
+            if "verify-oob-code" not in current_url:
+                break
+
+            if attempt < max_submit_attempts - 1:
+                self._log("warning", f"⚠️ 未跳转，重试提交验证码 ({attempt + 1}/{max_submit_attempts - 1})")
+                try:
+                    code_input.input("\n")
+                except Exception:
+                    pass
+                submit_btn = page.ele("css:button[type='submit']", timeout=2)
+                if not submit_btn:
+                    keywords = ["Verify", "Continue", "提交", "继续", "确认", "下一步", "验证"]
+                    buttons = page.eles("tag:button") or []
+                    for btn in buttons:
+                        text = (btn.text or "").strip()
+                        if text and any(kw in text for kw in keywords):
+                            submit_btn = btn
+                            break
+                if submit_btn:
+                    try:
+                        submit_btn.click()
+                    except Exception:
+                        pass
 
         # 记录当前 URL 状态
-        current_url = page.url
         self._log("info", f"📍 验证后 URL: {current_url}")
 
         # 检查是否还停留在验证码页面（说明提交失败）
