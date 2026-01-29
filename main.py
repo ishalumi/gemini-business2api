@@ -46,7 +46,8 @@ from core.session_auth import is_logged_in, login_user, logout_user, require_log
 # 导入核心模块
 from core.message import (
     parse_last_message,
-    build_full_context_text
+    build_full_context_text,
+    extract_text_from_content
 )
 from core.google_api import (
     get_common_headers,
@@ -1185,6 +1186,65 @@ def create_chunk(id: str, created: int, model: str, delta: dict, finish_reason: 
         "system_fingerprint": None  # OpenAI 标准字段（可选）
     }
     return json.dumps(chunk)
+
+# 过滤无意义请求的关键词（大小写不敏感）
+TEST_KEYWORDS = (
+    "test",
+    "testing",
+    "tester",
+    "demo",
+    "example",
+    "sample",
+    "hello",
+    "ping",
+    "pong",
+    "测试",
+    "測試",
+    "测试中",
+    "測試中",
+    "试试",
+    "試試",
+    "试一试",
+    "試一試",
+    "你好",
+    "您好",
+    "哈喽",
+    "哈囉",
+    "示例",
+    "样例"
+)
+
+def is_first_turn(messages: List[Message]) -> bool:
+    """判断是否为无历史消息的首条请求"""
+    if not messages:
+        return False
+    user_count = 0
+    assistant_count = 0
+    for msg in messages:
+        if msg.role == "user":
+            user_count += 1
+        elif msg.role == "assistant":
+            assistant_count += 1
+    return assistant_count == 0 and user_count == 1
+
+def get_first_user_text_for_filter(messages: List[Message]) -> str:
+    """获取首条用户消息文本（忽略多模态中的非文本部分）"""
+    for msg in messages:
+        if msg.role == "user":
+            return extract_text_from_content(msg.content)
+    return ""
+
+def get_baka_reason(text: str) -> Optional[str]:
+    """命中无意义请求规则时返回原因，否则返回 None"""
+    normalized = re.sub(r"[\s\-_.,，。!！?？]+", "", str(text or ""))
+    if not normalized:
+        return "empty"
+    lower = normalized.lower()
+    if any(keyword in lower for keyword in TEST_KEYWORDS):
+        return "keyword"
+    if len(normalized) < 10:
+        return f"short:{len(normalized)}"
+    return None
 # ---------- Auth endpoints (API) ----------
 
 @app.post("/login")
@@ -2168,6 +2228,8 @@ async def chat_impl(
     start_ts = time.time()
     request.state.first_response_time = None
     message_count = len(req.messages)
+    chat_id = f"chatcmpl-{uuid.uuid4()}"
+    created_time = int(time.time())
 
     monitor_recorded = False
 
@@ -2229,6 +2291,42 @@ async def chat_impl(
         global_stats.setdefault("model_request_timestamps", {})
         global_stats["model_request_timestamps"].setdefault(req.model, []).append(timestamp)
         await save_stats(global_stats)
+
+    # 过滤无意义请求（仅首条无历史消息）
+    baka_reason = None
+    if is_first_turn(req.messages):
+        first_user_text = get_first_user_text_for_filter(req.messages)
+        baka_reason = get_baka_reason(first_user_text)
+    if baka_reason:
+        logger.info(f"[CHAT] [req_{request_id}] 命中无意义请求过滤({baka_reason})，直接返回BAKA")
+        request.state.first_response_time = time.time()
+        await finalize_result("success", 200, None)
+
+        if req.stream:
+            headers = {
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            }
+
+            async def baka_stream():
+                start_chunk = create_chunk(chat_id, created_time, req.model, {"role": "assistant"}, None)
+                yield f"data: {start_chunk}\n\n"
+                content_chunk = create_chunk(chat_id, created_time, req.model, {"content": "BAKA!"}, None)
+                yield f"data: {content_chunk}\n\n"
+                final_chunk = create_chunk(chat_id, created_time, req.model, {}, "stop")
+                yield f"data: {final_chunk}\n\n"
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(baka_stream(), media_type="text/event-stream", headers=headers)
+
+        return {
+            "id": chat_id,
+            "object": "chat.completion",
+            "created": created_time,
+            "model": req.model,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "BAKA!"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        }
 
     # 2. 模型校验
 
@@ -2299,9 +2397,6 @@ async def chat_impl(
     # 每次请求都是新 Session：必须把上下文一起发出去（由结构/特殊token实现伪Role与记忆）
     text_to_send = last_text
     is_retry_mode = True
-
-    chat_id = f"chatcmpl-{uuid.uuid4()}"
-    created_time = int(time.time())
 
     # 封装生成器 (含图片上传和重试逻辑)
     async def response_wrapper():
