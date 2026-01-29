@@ -1,12 +1,10 @@
-import json, time, os, asyncio, uuid, ssl, re, yaml, shutil, base64
+import json, time, os, asyncio, uuid, ssl, re, base64
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Union, Dict, Any
-from pathlib import Path
 import logging
 from dotenv import load_dotenv
 
 import httpx
-import aiofiles
 from fastapi import FastAPI, HTTPException, Header, Request, Body, Form, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse, Response
@@ -28,10 +26,6 @@ else:
 # 确保数据目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# 统一的数据文件路径
-ACCOUNTS_FILE = os.path.join(DATA_DIR, "accounts.json")
-SETTINGS_FILE = os.path.join(DATA_DIR, "settings.yaml")
-STATS_FILE = os.path.join(DATA_DIR, "stats.json")
 IMAGE_DIR = os.path.join(DATA_DIR, "images")
 VIDEO_DIR = os.path.join(DATA_DIR, "videos")
 
@@ -112,14 +106,6 @@ async def load_stats():
                 data = None
         except Exception as e:
             logger.error(f"[STATS] 数据库加载失败: {str(e)[:50]}")
-    if data is None:
-        try:
-            if os.path.exists(STATS_FILE):
-                async with aiofiles.open(STATS_FILE, 'r', encoding='utf-8') as f:
-                    content = await f.read()
-                    data = json.loads(content)
-        except Exception:
-            pass
 
     # 如果没有加载到数据，返回默认值
     if data is None:
@@ -163,11 +149,6 @@ async def save_stats(stats):
                 return
         except Exception as e:
             logger.error(f"[STATS] 数据库保存失败: {str(e)[:50]}")
-    try:
-        async with aiofiles.open(STATS_FILE, 'w', encoding='utf-8') as f:
-            await f.write(json.dumps(stats_to_save, ensure_ascii=False, indent=2))
-    except Exception as e:
-        logger.error(f"[STATS] 保存统计数据失败: {str(e)[:50]}")
 
 # 初始化统计数据（需要在启动时异步加载）
 global_stats = {
@@ -925,15 +906,6 @@ async def auto_refresh_accounts_task():
 async def startup_event():
     """应用启动时初始化后台任务"""
     global global_stats
-
-    # 文件迁移逻辑：将根目录的旧文件迁移到 data 目录
-    old_accounts = "accounts.json"
-    if os.path.exists(old_accounts) and not os.path.exists(ACCOUNTS_FILE):
-        try:
-            shutil.copy(old_accounts, ACCOUNTS_FILE)
-            logger.info(f"{logger_prefix} 已迁移 {old_accounts} -> {ACCOUNTS_FILE}")
-        except Exception as e:
-            logger.warning(f"{logger_prefix} 文件迁移失败: {e}")
 
     # 加载统计数据
     global_stats = await load_stats()

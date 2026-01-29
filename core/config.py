@@ -3,17 +3,15 @@
 
 优先级规则：
 1. 安全配置：仅环境变量（ADMIN_KEY, SESSION_SECRET_KEY）
-2. 业务配置：YAML 配置文件 > 默认值
+2. 业务配置：数据库设置 > 默认值
 
 配置分类：
 - 安全配置：仅从环境变量读取，不可热更新（ADMIN_KEY, SESSION_SECRET_KEY）
-- 业务配置：仅从 YAML 读取，支持热更新（API_KEY, BASE_URL, PROXY, 重试策略等）
+- 业务配置：从数据库读取，支持热更新（API_KEY, BASE_URL, PROXY, 重试策略等）
 """
 
 import os
-import yaml
 import secrets
-from pathlib import Path
 from typing import Optional, List
 from pydantic import BaseModel, Field, validator
 from dotenv import load_dotenv
@@ -166,13 +164,7 @@ class ConfigManager:
     """配置管理器（单例）"""
 
     def __init__(self, yaml_path: str = None):
-        # 自动检测环境并设置默认路径
-        if yaml_path is None:
-            if os.path.exists("/data"):
-                yaml_path = "/data/settings.yaml"  # HF Pro 持久化
-            else:
-                yaml_path = "data/settings.yaml"  # 本地存储
-        self.yaml_path = Path(yaml_path)
+        # 保持参数占位以兼容旧调用，但不再使用本地文件
         self._config: Optional[AppConfig] = None
         self.load()
 
@@ -182,7 +174,7 @@ class ConfigManager:
 
         优先级规则：
         1. 安全配置（ADMIN_KEY, SESSION_SECRET_KEY）：仅从环境变量读取
-        2. 其他配置：YAML > 默认值
+        2. 其他配置：数据库 > 默认值
         """
         # 1. 加载 YAML 配置
         yaml_data = self._load_yaml()
@@ -354,20 +346,14 @@ class ConfigManager:
         )
 
     def _load_yaml(self) -> dict:
-        """加载 YAML 文件"""
+        """从数据库加载设置"""
         if storage.is_database_enabled():
             try:
                 data = storage.load_settings_sync()
                 if isinstance(data, dict):
                     return data
             except Exception as e:
-                print(f"[WARN] 加载数据库设置失败: {e}，使用本地配置")
-        if self.yaml_path.exists():
-            try:
-                with open(self.yaml_path, 'r', encoding='utf-8') as f:
-                    return yaml.safe_load(f) or {}
-            except Exception as e:
-                print(f"[WARN] 加载配置文件失败: {e}，使用默认配置")
+                print(f"[WARN] 加载数据库设置失败: {e}")
         return {}
 
     def _generate_secret(self) -> str:
@@ -375,17 +361,12 @@ class ConfigManager:
         return secrets.token_urlsafe(32)
 
     def save_yaml(self, data: dict):
-        """保存 YAML 配置"""
-        if storage.is_database_enabled():
-            try:
-                saved = storage.save_settings_sync(data)
-                if saved:
-                    return
-            except Exception as e:
-                print(f"[WARN] 保存数据库设置失败: {e}，降级到本地文件")
-        self.yaml_path.parent.mkdir(exist_ok=True)
-        with open(self.yaml_path, 'w', encoding='utf-8') as f:
-            yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        """保存配置到数据库"""
+        if not storage.is_database_enabled():
+            raise RuntimeError("Database is not enabled")
+        saved = storage.save_settings_sync(data)
+        if not saved:
+            raise RuntimeError("Database write failed")
 
     def reload(self):
         """重新加载配置（热更新）"""

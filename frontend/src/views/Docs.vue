@@ -32,7 +32,7 @@
           <div class="space-y-2">
             <p class="text-sm font-semibold">账户配置格式</p>
             <p class="mt-1 text-xs text-muted-foreground">
-              accounts.json 或环境变量 ACCOUNTS_CONFIG 使用的 JSON 数组
+              管理面板（数据库）或环境变量 ACCOUNTS_CONFIG 使用的 JSON 数组
             </p>
             <pre class="mt-3 overflow-x-auto whitespace-pre-wrap rounded-2xl border border-border bg-card px-4 py-3 text-xs font-mono scrollbar-slim">[
   {

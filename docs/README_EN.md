@@ -83,9 +83,9 @@ Click the **Fork** button in the top-right corner to copy this project to your G
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ADMIN_KEY` | ✅ | Admin panel login key (set your own) |
-| `DATABASE_URL` | Recommended | PostgreSQL connection string (see "Database Persistence" below) |
+| `DATABASE_URL` | ✅ | PostgreSQL connection string (see below) |
 
-> 💡 **Strongly recommended to configure DATABASE_URL**, otherwise data will be lost when Zeabur restarts. Get a free database at [neon.tech](https://neon.tech)
+> 💡 `DATABASE_URL` is required; without it the service cannot load account data.
 
 4. Click **Redeploy** to apply the environment variables
 5. Wait for the build to complete (~1-2 minutes)
@@ -206,14 +206,18 @@ docker-compose pull && docker-compose up -d
 Thanks to [PR #9](https://github.com/Dreamy-rain/gemini-business2api/pull/9) for optimizing the Dockerfile build
 
 
-### Database Persistence (Recommended)
+### Database Persistence (Required)
 
-Configure a PostgreSQL database to persist accounts, settings, and statistics across restarts.
+This project requires PostgreSQL for persistence.
 
 - Set `DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require`
   - Local deployment: Add to `.env` file
   - Zeabur deployment: Add in the Variables tab
+- Accounts/settings/stats are stored in the database only (no local JSON/YAML files)
 - Keep the connection string secret (contains credentials)
+
+Legacy data migration:
+- Run `python scripts/migrate_to_database.py` to migrate from `kv_store` or local files
 
 ```
 # Get DATABASE_URL from Neon (Free)
@@ -231,7 +235,7 @@ Configure a PostgreSQL database to persist accounts, settings, and statistics ac
 
 ### Configuration Tips
 
-- Account config prioritizes `ACCOUNTS_CONFIG` env var, or can be entered in admin panel and saved to `data/accounts.json`.
+- Account config prioritizes `ACCOUNTS_CONFIG` env var, or can be entered in admin panel and saved to the database.
 - For authentication, configure `API_KEY` in the admin settings to protect `/v1/chat/completions`.
 
 ### Documentation

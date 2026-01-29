@@ -84,9 +84,9 @@
 | 变量名         | 必填 | 说明                                          |
 | -------------- | ---- | --------------------------------------------- |
 | `ADMIN_KEY`    | ✅    | 管理面板登录密钥，自己设置一个                |
-| `DATABASE_URL` | 推荐 | PostgreSQL 连接串（见下方"数据库持久化"说明） |
+| `DATABASE_URL` | ✅    | PostgreSQL 连接串（见下方"数据库持久化"说明） |
 
-> 💡 **强烈建议配置 DATABASE_URL**，否则 Zeabur 重启后数据会丢失。免费数据库获取：[neon.tech](https://neon.tech)
+> 💡 必须配置 `DATABASE_URL`，否则服务无法加载账户配置。
 
 4. 点击 **重新部署** 使环境变量生效
 5. 等待构建完成（约 1-2 分钟）
@@ -220,16 +220,18 @@ docker-compose pull && docker-compose up -d
 ```
 
 
-### 数据库持久化（可选）（强烈推荐）
+### 数据库持久化（强烈推荐）
 
-💡 提示：远程环境(Hugging Face/Linux)和本地环境可共用同一数据库，账户数据将自动保持同步
+💡 提示：本项目仅支持 PostgreSQL 持久化，请配置 `DATABASE_URL`。
 
-- HF Spaces 环境建议开启，否则重启会丢数据
 - 设置 `DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require`
   - 本地：写入 `.env`
   - HF Spaces：Settings -> Variables/Secrets
-- 启用后账户/设置/统计写入数据库（HF Spaces 重启不丢）
+- 账户/设置/统计均存入数据库，不再写入本地 JSON/YAML 文件
 - 注意：连接串包含密码，请勿公开
+
+旧数据迁移：
+- 旧版 `kv_store` 或本地文件可手动迁移：`python scripts/migrate_to_database.py`
 
 ```
 #  Neon 获取 DATABASE_URL（推荐）
@@ -247,7 +249,7 @@ docker-compose pull && docker-compose up -d
 
 ### 配置提示
 
-- 账号配置优先读取 `ACCOUNTS_CONFIG`，也可在管理面板中录入并保存至 `data/accounts.json`。
+- 账号配置优先读取 `ACCOUNTS_CONFIG`，也可在管理面板中录入并保存至数据库。
 - 如需鉴权，可在管理面板设置中配置 `API_KEY` 保护 `/v1/chat/completions`。
 
 ### 更多文档

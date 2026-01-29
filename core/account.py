@@ -38,13 +38,6 @@ QUOTA_TYPES = {
     "videos": "视频"
 }
 
-# 配置文件路径 - 自动检测环境
-if os.path.exists("/data"):
-    ACCOUNTS_FILE = "/data/accounts.json"  # HF Pro 持久化
-else:
-    ACCOUNTS_FILE = "data/accounts.json"  # 本地存储（统一到 data 目录）
-
-
 @dataclass
 class AccountConfig:
     """单个账户配置"""
@@ -509,42 +502,19 @@ class MultiAccountManager:
         return selected
 
 
-# ---------- 配置文件管理 ----------
-
-def _save_to_file(accounts_data: list):
-    """保存账户配置到本地文件"""
-    os.makedirs(os.path.dirname(ACCOUNTS_FILE) or ".", exist_ok=True)
-    with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(accounts_data, f, ensure_ascii=False, indent=2)
-    logger.info(f"[CONFIG] 配置已保存到 {ACCOUNTS_FILE}")
-
-
-def _load_from_file() -> list:
-    """从本地文件加载账户配置"""
-    if os.path.exists(ACCOUNTS_FILE):
-        try:
-            with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"[CONFIG] 文件加载失败: {str(e)}")
-    return None
-
+# ---------- 配置管理 ----------
 
 def save_accounts_to_file(accounts_data: list):
-    """保存账户配置（优先数据库，降级到文件）"""
-    if storage.is_database_enabled():
-        try:
-            saved = storage.save_accounts_sync(accounts_data)
-            if saved:
-                return
-        except Exception as e:
-            logger.warning(f"[CONFIG] 数据库保存失败: {e}，降级到文件存储")
-
-    _save_to_file(accounts_data)
+    """保存账户配置（仅数据库模式）。"""
+    if not storage.is_database_enabled():
+        raise RuntimeError("Database is not enabled")
+    saved = storage.save_accounts_sync(accounts_data)
+    if not saved:
+        raise RuntimeError("Database write failed")
 
 
 def load_accounts_from_source() -> list:
-    """从环境变量、数据库或文件加载账户配置"""
+    """从环境变量或数据库加载账户配置。"""
     # 1. 优先从环境变量加载
     env_accounts = os.environ.get('ACCOUNTS_CONFIG')
     if env_accounts:
@@ -558,45 +528,50 @@ def load_accounts_from_source() -> list:
         except Exception as e:
             logger.error(f"[CONFIG] 环境变量加载失败: {str(e)}")
 
-    # 2. 尝试从数据库加载
+    # 2. 从数据库加载（严格模式）
     if storage.is_database_enabled():
         try:
             accounts_data = storage.load_accounts_sync()
-            if accounts_data is not None:
-                if accounts_data:
-                    logger.info(f"[CONFIG] 从数据库加载配置，共 {len(accounts_data)} 个账户")
-                else:
-                    logger.warning(f"[CONFIG] 数据库中账户配置为空")
-                return accounts_data
+
+            # 严格模式：数据库连接失败时抛出异常，阻止应用启动
+            if accounts_data is None:
+                logger.error("[CONFIG] ❌ 数据库连接失败")
+                logger.error("[CONFIG] 请检查 DATABASE_URL 配置或网络连接")
+                raise RuntimeError("数据库连接失败，应用无法启动")
+
+            if accounts_data:
+                logger.info(f"[CONFIG] 从数据库加载配置，共 {len(accounts_data)} 个账户")
+            else:
+                logger.warning("[CONFIG] 数据库中账户配置为空")
+                logger.warning("[CONFIG] 如需迁移数据，请运行: python scripts/migrate_to_database.py")
+
+            return accounts_data
+        except RuntimeError:
+            raise
         except Exception as e:
-            logger.warning(f"[CONFIG] 数据库加载失败: {e}，降级到文件存储")
+            logger.error(f"[CONFIG] ❌ 数据库加载失败: {e}")
+            raise RuntimeError(f"数据库加载失败: {e}")
 
-    # 3. 从文件加载
-    accounts_data = _load_from_file()
-    if accounts_data is not None:
-        if accounts_data:
-            logger.info(f"[CONFIG] 从文件加载配置: {ACCOUNTS_FILE}，共 {len(accounts_data)} 个账户")
-        else:
-            logger.warning(f"[CONFIG] 账户配置为空，请在管理面板添加账户或编辑 {ACCOUNTS_FILE}")
-        return accounts_data
-
-    # 4. 无配置处理
-    if storage.is_database_enabled():
-        # 数据库模式：不自动创建空配置，避免覆盖数据库
-        logger.error(f"[CONFIG] 数据库模式下未找到配置，请检查数据库连接或在管理面板添加账户")
-        logger.error(f"[CONFIG] ⚠️ 为防止数据覆盖，不会自动创建空配置")
-        return []
-    else:
-        # 文件模式：创建空配置文件
-        logger.warning(f"[CONFIG] 未找到配置，已创建空配置")
-        logger.info(f"[CONFIG] 💡 请在管理面板添加账户，或设置 DATABASE_URL 使用数据库存储")
-        save_accounts_to_file([])
-        return []
+    logger.error("[CONFIG] 未启用数据库且未提供 ACCOUNTS_CONFIG")
+    raise RuntimeError("Database is not enabled")
 
 
 def get_account_id(acc: dict, index: int) -> str:
     """获取账户ID（有显式ID则使用，否则生成默认ID）"""
     return acc.get("id", f"account_{index}")
+
+
+def _normalize_accounts_for_save(accounts_data: list) -> list:
+    """保存前规范化账户列表（补齐 id 字段）"""
+    normalized = []
+    for i, acc in enumerate(accounts_data or [], 1):
+        if not isinstance(acc, dict):
+            raise ValueError(f"账户 {i} 格式错误：必须是对象")
+        if not acc.get("id"):
+            acc = dict(acc)
+            acc["id"] = get_account_id(acc, i)
+        normalized.append(acc)
+    return normalized
 
 
 def load_multi_account_config(
@@ -706,8 +681,9 @@ def update_accounts_config(
     session_cache_ttl_seconds: int,
     global_stats: dict
 ) -> MultiAccountManager:
-    """更新账户配置（保存到文件并重新加载）"""
-    save_accounts_to_file(accounts_data)
+    """更新账户配置（保存到数据库并重新加载）"""
+    normalized = _normalize_accounts_for_save(accounts_data)
+    save_accounts_to_file(normalized)
     return reload_accounts(
         multi_account_mgr,
         http_client,
@@ -730,18 +706,9 @@ def delete_account(
     global_stats: dict
 ) -> MultiAccountManager:
     """删除单个账户"""
-    accounts_data = load_accounts_from_source()
-
-    # 过滤掉要删除的账户
-    filtered = [
-        acc for i, acc in enumerate(accounts_data, 1)
-        if get_account_id(acc, i) != account_id
-    ]
-
-    if len(filtered) == len(accounts_data):
+    deleted = storage.delete_accounts_sync([account_id])
+    if deleted <= 0:
         raise ValueError(f"账户 {account_id} 不存在")
-
-    save_accounts_to_file(filtered)
     return reload_accounts(
         multi_account_mgr,
         http_client,
@@ -764,22 +731,12 @@ def update_account_disabled_status(
     session_cache_ttl_seconds: int,
     global_stats: dict
 ) -> MultiAccountManager:
-    """更新账户的禁用状态（优化版：直接修改内存）"""
-    # 直接修改内存中的账户状态
-    if account_id not in multi_account_mgr.accounts:
+    """更新账户的禁用状态（数据库直写）。"""
+    updated = storage.update_account_disabled_sync(account_id, disabled)
+    if not updated:
         raise ValueError(f"账户 {account_id} 不存在")
-
-    account_mgr = multi_account_mgr.accounts[account_id]
-    account_mgr.config.disabled = disabled
-
-    # 保存到文件
-    accounts_data = load_accounts_from_source()
-    for i, acc in enumerate(accounts_data, 1):
-        if get_account_id(acc, i) == account_id:
-            acc["disabled"] = disabled
-            break
-
-    save_accounts_to_file(accounts_data)
+    if account_id in multi_account_mgr.accounts:
+        multi_account_mgr.accounts[account_id].config.disabled = disabled
 
     status_text = "已禁用" if disabled else "已启用"
     logger.info(f"[CONFIG] 账户 {account_id} {status_text}")
@@ -791,32 +748,13 @@ def bulk_update_account_disabled_status(
     disabled: bool,
     multi_account_mgr: MultiAccountManager,
 ) -> tuple[int, list[str]]:
-    """批量更新账户禁用状态，单次最多50个，仅读写一次文件"""
-    success_count = 0
-    errors = []
-
-    # 1. 更新内存状态
+    """批量更新账户禁用状态，单次最多50个。"""
+    updated, missing = storage.bulk_update_accounts_disabled_sync(account_ids, disabled)
     for account_id in account_ids:
-        if account_id not in multi_account_mgr.accounts:
-            errors.append(f"{account_id}: 账户不存在")
-            continue
-        account_mgr = multi_account_mgr.accounts[account_id]
-        account_mgr.config.disabled = disabled
-        success_count += 1
+        if account_id in multi_account_mgr.accounts:
+            multi_account_mgr.accounts[account_id].config.disabled = disabled
 
-    # 2. 只读取一次文件
-    accounts_data = load_accounts_from_source()
-    account_id_set = set(account_ids)
-
-    # 3. 批量更新
-    for i, acc in enumerate(accounts_data, 1):
-        acc_id = get_account_id(acc, i)
-        if acc_id in account_id_set:
-            acc["disabled"] = disabled
-
-    # 4. 只保存一次
-    save_accounts_to_file(accounts_data)
-
+    errors = [f"{account_id}: 账户不存在" for account_id in missing]
     status_text = "已禁用" if disabled else "已启用"
-    logger.info(f"[CONFIG] 批量{status_text} {success_count}/{len(account_ids)} 个账户")
-    return success_count, errors
+    logger.info(f"[CONFIG] 批量{status_text} {updated}/{len(account_ids)} 个账户")
+    return updated, errors
