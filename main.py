@@ -1245,6 +1245,14 @@ def get_baka_reason(text: str) -> Optional[str]:
     if len(normalized) < 10:
         return f"short:{len(normalized)}"
     return None
+
+def get_sse_headers() -> Dict[str, str]:
+    """SSE 通用响应头，减少中间层缓冲/缓存与断流风险"""
+    return {
+        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
 # ---------- Auth endpoints (API) ----------
 
 @app.post("/login")
@@ -2303,10 +2311,7 @@ async def chat_impl(
         await finalize_result("success", 200, None)
 
         if req.stream:
-            headers = {
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            }
+            headers = get_sse_headers()
 
             async def baka_stream():
                 start_chunk = create_chunk(chat_id, created_time, req.model, {"role": "assistant"}, None)
@@ -2595,10 +2600,7 @@ async def chat_impl(
 
     if req.stream:
         # 关闭缓存/代理缓冲，降低“长时间无输出导致客户端/代理断开”的概率
-        headers = {
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        }
+        headers = get_sse_headers()
         return StreamingResponse(response_wrapper(), media_type="text/event-stream", headers=headers)
     
     full_content = ""
@@ -2730,7 +2732,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
     # 生图/思维链等阶段可能会出现“上游长时间无输出”，这里通过：
     # 1) 禁用 read timeout（避免 httpx 自己掐断）
     # 2) 在下游 SSE 定期发送心跳（避免客户端/代理超时断开）
-    heartbeat_interval_seconds = float(os.getenv("STREAM_HEARTBEAT_SECONDS", "5"))
+    heartbeat_interval_seconds = float(os.getenv("STREAM_HEARTBEAT_SECONDS", "3"))
     heartbeat_mode = (os.getenv("STREAM_HEARTBEAT_MODE", "chunk") or "chunk").lower()
     last_yield_ts = time.time()
     heartbeat_payload = None
@@ -3069,4 +3071,5 @@ async def not_found_handler(request: Request, exc: HTTPException):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "7860"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    timeout_keep_alive = int(os.getenv("UVICORN_TIMEOUT_KEEP_ALIVE", "120"))
+    uvicorn.run(app, host="0.0.0.0", port=port, timeout_keep_alive=timeout_keep_alive)
