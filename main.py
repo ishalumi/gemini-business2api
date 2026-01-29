@@ -1860,7 +1860,10 @@ async def admin_get_settings(request: Request):
             "random_delay_min_ms": config.automation.random_delay_min_ms,
             "random_delay_max_ms": config.automation.random_delay_max_ms,
             "between_account_min_seconds": config.automation.between_account_min_seconds,
-            "between_account_max_seconds": config.automation.between_account_max_seconds
+            "between_account_max_seconds": config.automation.between_account_max_seconds,
+            "verification_poll_attempts": config.automation.verification_poll_attempts,
+            "verification_poll_interval_seconds": config.automation.verification_poll_interval_seconds,
+            "verification_resend_clicks": config.automation.verification_resend_clicks
         },
         "public_display": {
             "logo_url": config.public_display.logo_url,
@@ -1939,6 +1942,9 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         automation.setdefault("random_delay_max_ms", config.automation.random_delay_max_ms)
         automation.setdefault("between_account_min_seconds", config.automation.between_account_min_seconds)
         automation.setdefault("between_account_max_seconds", config.automation.between_account_max_seconds)
+        automation.setdefault("verification_poll_attempts", config.automation.verification_poll_attempts)
+        automation.setdefault("verification_poll_interval_seconds", config.automation.verification_poll_interval_seconds)
+        automation.setdefault("verification_resend_clicks", config.automation.verification_resend_clicks)
         new_settings["automation"] = automation
 
         # 保存旧配置用于对比

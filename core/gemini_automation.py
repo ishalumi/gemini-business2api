@@ -50,6 +50,9 @@ class GeminiAutomation:
         geo_accuracy: int = 50,
         random_delay_min_ms: int = 120,
         random_delay_max_ms: int = 380,
+        verification_poll_attempts: int = 3,
+        verification_poll_interval_seconds: int = 4,
+        verification_resend_clicks: int = 4,
         timeout: int = 60,
         log_callback=None,
     ) -> None:
@@ -64,6 +67,9 @@ class GeminiAutomation:
         self.geo_accuracy = geo_accuracy
         self.random_delay_min_ms = max(0, int(random_delay_min_ms))
         self.random_delay_max_ms = max(self.random_delay_min_ms, int(random_delay_max_ms))
+        self.verification_poll_attempts = max(1, int(verification_poll_attempts))
+        self.verification_poll_interval_seconds = max(1, int(verification_poll_interval_seconds))
+        self.verification_resend_clicks = max(0, int(verification_resend_clicks))
         self.timeout = timeout
         self.log_callback = log_callback
         self._page = None
@@ -288,25 +294,29 @@ class GeminiAutomation:
 
         # Step 5: 轮询邮件获取验证码（传入发送时间)
         self._log("info", "📬 开始轮询邮箱获取验证码...")
-        code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
+        code = self._poll_for_verification_code(mail_client, send_time)
 
         if not code:
-            self._log("warning", "⚠️ 验证码获取超时，尝试重新发送...")
-            # 更新发送时间（在点击按钮之前记录）
-            send_time = datetime.now()
-            # 尝试点击重新发送按钮
-            if self._click_resend_code_button(page):
-                self._log("info", "🔄 已点击重新发送按钮，等待新验证码...")
-                # 再次轮询验证码
-                code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
-                if not code:
-                    self._log("error", "❌ 重新发送后仍未收到验证码")
-                    self._save_screenshot(page, "code_timeout_after_resend")
-                    return {"success": False, "error": "verification code timeout after resend"}
-            else:
-                self._log("error", "❌ 验证码超时且未找到重新发送按钮")
+            if self.verification_resend_clicks <= 0:
+                self._log("error", "❌ 验证码获取超时")
                 self._save_screenshot(page, "code_timeout")
                 return {"success": False, "error": "verification code timeout"}
+            self._log("warning", f"⚠️ 验证码获取超时，准备重发 {self.verification_resend_clicks} 次...")
+            for attempt in range(self.verification_resend_clicks):
+                # 更新发送时间（在点击按钮之前记录）
+                send_time = datetime.now()
+                if not self._click_resend_code_button(page):
+                    self._log("error", "❌ 未找到重新发送按钮")
+                    self._save_screenshot(page, "resend_button_missing")
+                    return {"success": False, "error": "resend code button not found"}
+                self._log("info", f"🔄 已点击重新发送按钮 ({attempt + 1}/{self.verification_resend_clicks})，等待新验证码...")
+                code = self._poll_for_verification_code(mail_client, send_time)
+                if code:
+                    break
+            if not code:
+                self._log("error", "❌ 多次重发后仍未收到验证码")
+                self._save_screenshot(page, "code_timeout_after_resend")
+                return {"success": False, "error": "verification code timeout after resend"}
 
         self._log("info", f"✅ 收到验证码: {code}")
 
@@ -446,6 +456,13 @@ class GeminiAutomation:
                     continue
             self._sleep(2)
         return None
+
+    def _poll_for_verification_code(self, mail_client, since_time) -> Optional[str]:
+        """按配置轮询验证码"""
+        poll_attempts = max(1, int(self.verification_poll_attempts))
+        poll_interval = max(1, int(self.verification_poll_interval_seconds))
+        poll_timeout = poll_attempts * poll_interval
+        return mail_client.poll_for_code(timeout=poll_timeout, interval=poll_interval, since_time=since_time)
 
     def _simulate_human_input(self, element, text: str) -> bool:
         """模拟人类输入（逐字符输入，带随机延迟）

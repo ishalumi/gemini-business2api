@@ -112,6 +112,9 @@ class AutomationConfig(BaseModel):
     random_delay_max_ms: int = Field(default=380, ge=0, le=5000, description="随机延迟最大值（毫秒）")
     between_account_min_seconds: int = Field(default=0, ge=0, le=600, description="注册账号间隔最小值（秒）")
     between_account_max_seconds: int = Field(default=0, ge=0, le=600, description="注册账号间隔最大值（秒）")
+    verification_poll_attempts: int = Field(default=3, ge=1, le=20, description="验证码轮询次数（每次发送/重发）")
+    verification_poll_interval_seconds: int = Field(default=4, ge=1, le=30, description="验证码轮询间隔（秒）")
+    verification_resend_clicks: int = Field(default=4, ge=0, le=10, description="验证码重发点击次数（不含首次发送）")
 
     @validator("random_delay_max_ms")
     def validate_random_delay_max(cls, v, values):
@@ -297,6 +300,36 @@ class ConfigManager:
             between_max = between_min
         automation_data["between_account_min_seconds"] = between_min
         automation_data["between_account_max_seconds"] = between_max
+
+        try:
+            poll_attempts = int(automation_data.get("verification_poll_attempts", 3))
+        except Exception:
+            poll_attempts = 3
+        try:
+            poll_interval = int(automation_data.get("verification_poll_interval_seconds", 4))
+        except Exception:
+            poll_interval = 4
+        try:
+            resend_clicks = int(automation_data.get("verification_resend_clicks", 4))
+        except Exception:
+            resend_clicks = 4
+
+        if poll_attempts < 1:
+            poll_attempts = 1
+        if poll_attempts > 20:
+            poll_attempts = 20
+        if poll_interval < 1:
+            poll_interval = 1
+        if poll_interval > 30:
+            poll_interval = 30
+        if resend_clicks < 0:
+            resend_clicks = 0
+        if resend_clicks > 10:
+            resend_clicks = 10
+
+        automation_data["verification_poll_attempts"] = poll_attempts
+        automation_data["verification_poll_interval_seconds"] = poll_interval
+        automation_data["verification_resend_clicks"] = resend_clicks
 
         automation_config = AutomationConfig(**automation_data)
 

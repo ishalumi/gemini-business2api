@@ -237,6 +237,9 @@ class LoginService(BaseTaskService[LoginTask]):
                 geo_accuracy=config.automation.geo_accuracy,
                 random_delay_min_ms=config.automation.random_delay_min_ms,
                 random_delay_max_ms=config.automation.random_delay_max_ms,
+                verification_poll_attempts=config.automation.verification_poll_attempts,
+                verification_poll_interval_seconds=config.automation.verification_poll_interval_seconds,
+                verification_resend_clicks=config.automation.verification_resend_clicks,
                 log_callback=log_cb,
             )
         else:
@@ -256,6 +259,9 @@ class LoginService(BaseTaskService[LoginTask]):
                 geo_accuracy=config.automation.geo_accuracy,
                 random_delay_min_ms=config.automation.random_delay_min_ms,
                 random_delay_max_ms=config.automation.random_delay_max_ms,
+                verification_poll_attempts=config.automation.verification_poll_attempts,
+                verification_poll_interval_seconds=config.automation.verification_poll_interval_seconds,
+                verification_resend_clicks=config.automation.verification_resend_clicks,
                 log_callback=log_cb,
             )
         # 允许外部取消时立刻关闭浏览器

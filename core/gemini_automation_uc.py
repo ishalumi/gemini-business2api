@@ -39,6 +39,9 @@ class GeminiAutomationUC:
         geo_accuracy: int = 50,
         random_delay_min_ms: int = 120,
         random_delay_max_ms: int = 380,
+        verification_poll_attempts: int = 3,
+        verification_poll_interval_seconds: int = 4,
+        verification_resend_clicks: int = 4,
         timeout: int = 60,
         log_callback=None,
     ) -> None:
@@ -53,6 +56,9 @@ class GeminiAutomationUC:
         self.geo_accuracy = geo_accuracy
         self.random_delay_min_ms = max(0, int(random_delay_min_ms))
         self.random_delay_max_ms = max(self.random_delay_min_ms, int(random_delay_max_ms))
+        self.verification_poll_attempts = max(1, int(verification_poll_attempts))
+        self.verification_poll_interval_seconds = max(1, int(verification_poll_interval_seconds))
+        self.verification_resend_clicks = max(0, int(verification_resend_clicks))
         self.timeout = timeout
         self.log_callback = log_callback
         self.driver = None
@@ -221,12 +227,28 @@ class GeminiAutomationUC:
 
         # 获取验证码（传入发送时间）
         self._log("info", "polling for verification code")
-        code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
+        code = self._poll_for_verification_code(mail_client, send_time)
 
         if not code:
-            self._log("error", "verification code timeout")
-            self._save_screenshot("code_timeout")
-            return {"success": False, "error": "verification code timeout"}
+            if self.verification_resend_clicks <= 0:
+                self._log("error", "verification code timeout")
+                self._save_screenshot("code_timeout")
+                return {"success": False, "error": "verification code timeout"}
+            self._log("warning", f"verification code timeout, retry resend {self.verification_resend_clicks} times")
+            for attempt in range(self.verification_resend_clicks):
+                send_time = datetime.now()
+                if not self._click_resend_code_button():
+                    self._log("error", "resend button not found")
+                    self._save_screenshot("resend_button_missing")
+                    return {"success": False, "error": "resend code button not found"}
+                self._log("info", f"resend clicked ({attempt + 1}/{self.verification_resend_clicks}), polling again")
+                code = self._poll_for_verification_code(mail_client, send_time)
+                if code:
+                    break
+            if not code:
+                self._log("error", "verification code timeout after resend")
+                self._save_screenshot("code_timeout_after_resend")
+                return {"success": False, "error": "verification code timeout after resend"}
 
         self._log("info", f"code received: {code}")
 
@@ -335,6 +357,21 @@ class GeminiAutomationUC:
 
         return False
 
+    def _click_resend_code_button(self) -> bool:
+        """点击重新发送验证码按钮"""
+        self._sleep(2)
+        try:
+            buttons = self.driver.find_elements(By.TAG_NAME, "button")
+            for btn in buttons:
+                text = (btn.text or "").strip().lower()
+                if text and ("重新" in text or "resend" in text):
+                    self.driver.execute_script("arguments[0].click();", btn)
+                    self._sleep(2)
+                    return True
+        except Exception:
+            pass
+        return False
+
     def _wait_for_code_input(self, timeout: int = 30):
         """等待验证码输入框出现"""
         try:
@@ -351,6 +388,13 @@ class GeminiAutomationUC:
             return self.driver.find_element(By.CSS_SELECTOR, "input[name='pinInput']")
         except NoSuchElementException:
             return None
+
+    def _poll_for_verification_code(self, mail_client, since_time) -> Optional[str]:
+        """按配置轮询验证码"""
+        poll_attempts = max(1, int(self.verification_poll_attempts))
+        poll_interval = max(1, int(self.verification_poll_interval_seconds))
+        poll_timeout = poll_attempts * poll_interval
+        return mail_client.poll_for_code(timeout=poll_timeout, interval=poll_interval, since_time=since_time)
 
     def _find_verify_button(self):
         """查找验证按钮"""

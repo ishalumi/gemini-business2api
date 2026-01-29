@@ -347,6 +347,44 @@
                   </div>
                 </div>
                 <div class="border-t border-border/60 pt-4 space-y-4">
+                  <p class="text-xs font-medium text-foreground">验证码策略</p>
+                  <div class="space-y-2">
+                    <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <label for="automation-verify-poll-attempts">邮箱拉取次数</label>
+                      <HelpTip text="每次发送/重发后轮询次数，数值越小越快" />
+                    </div>
+                    <div class="grid grid-cols-3 gap-3">
+                      <input
+                        id="automation-verify-poll-attempts"
+                        v-model.number="localSettings.automation.verification_poll_attempts"
+                        type="number"
+                        min="1"
+                        class="rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                        placeholder="轮询次数"
+                      />
+                      <input
+                        id="automation-verify-poll-interval"
+                        v-model.number="localSettings.automation.verification_poll_interval_seconds"
+                        type="number"
+                        min="1"
+                        class="rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                        placeholder="间隔（秒）"
+                      />
+                      <input
+                        id="automation-verify-resend-clicks"
+                        v-model.number="localSettings.automation.verification_resend_clicks"
+                        type="number"
+                        min="0"
+                        class="rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                        placeholder="重发次数"
+                      />
+                    </div>
+                    <p class="text-xs text-muted-foreground">
+                      重发次数不含首次发送；总点击次数 = 1 + 重发次数
+                    </p>
+                  </div>
+                </div>
+                <div class="border-t border-border/60 pt-4 space-y-4">
                   <p class="text-xs font-medium text-foreground">随机延迟</p>
                   <div class="space-y-2">
                     <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -756,6 +794,15 @@ watch(settings, (value) => {
   next.automation.random_delay_max_ms = Number.isFinite(next.automation.random_delay_max_ms)
     ? next.automation.random_delay_max_ms
     : 380
+  next.automation.verification_poll_attempts = Number.isFinite(next.automation.verification_poll_attempts)
+    ? next.automation.verification_poll_attempts
+    : 3
+  next.automation.verification_poll_interval_seconds = Number.isFinite(next.automation.verification_poll_interval_seconds)
+    ? next.automation.verification_poll_interval_seconds
+    : 4
+  next.automation.verification_resend_clicks = Number.isFinite(next.automation.verification_resend_clicks)
+    ? next.automation.verification_resend_clicks
+    : 4
   next.automation.between_account_min_seconds = Number.isFinite(next.automation.between_account_min_seconds)
     ? next.automation.between_account_min_seconds
     : 0

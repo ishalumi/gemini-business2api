@@ -120,6 +120,9 @@ export interface Settings {
     random_delay_max_ms: number
     between_account_min_seconds: number
     between_account_max_seconds: number
+    verification_poll_attempts: number
+    verification_poll_interval_seconds: number
+    verification_resend_clicks: number
   }
   public_display: {
     logo_url?: string
