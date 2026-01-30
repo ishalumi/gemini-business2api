@@ -176,6 +176,7 @@ class GeminiAutomationPatchright:
                 "headless": headless_value,
                 "args": args,
             }
+            self._log("info", f"🔧 context_options: {context_options}")
             self._browser = self._playwright.chromium.launch(**launch_options)
             self._context = self._browser.new_context(**context_options)
             self._log("info", f"🧭 使用非持久化上下文启动浏览器 (headless={headless_value})")
