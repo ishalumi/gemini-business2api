@@ -114,6 +114,11 @@ class GeminiAutomationPatchright:
 
     def _create_context(self) -> None:
         """创建 Patchright 浏览器上下文"""
+        # 确保 DISPLAY 环境变量已设置（用于 headed 模式）
+        if not os.environ.get("DISPLAY") and not self.headless and not self._force_headless:
+            os.environ["DISPLAY"] = ":99"
+            self._log("info", "🖥️ 设置 DISPLAY=:99 用于 headed 模式")
+
         self._playwright = sync_playwright().start()
         self._user_data_dir = tempfile.mkdtemp(prefix="patchright_")
         headless_value = True if self._force_headless else self.headless
