@@ -73,7 +73,8 @@ class GeminiAutomationPatchright:
         self._context = None
         self._page = None
         self._user_data_dir = None
-        self._use_persistent_context = True
+        # 代理场景下优先使用非持久化上下文，避免持久化上下文与代理组合导致连接异常
+        self._use_persistent_context = not self.proxy
         self._force_headless = False
         self._skip_warmup_once = False
 
@@ -131,9 +132,6 @@ class GeminiAutomationPatchright:
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
                 "--webrtc-ip-handling-policy=disable_non_proxied_udp",
             ])
-        if self.proxy:
-            args.append(f"--proxy-server={self.proxy}")
-
         if self._use_persistent_context:
             context_options = {
                 "headless": headless_value,
@@ -168,7 +166,7 @@ class GeminiAutomationPatchright:
                 user_data_dir=self._user_data_dir,
                 **context_options,
             )
-            self._log("info", "🧭 使用持久化上下文启动浏览器")
+            self._log("info", f"🧭 使用持久化上下文启动浏览器 (headless={headless_value})")
         else:
             launch_options = {
                 "headless": headless_value,
@@ -178,7 +176,7 @@ class GeminiAutomationPatchright:
                 launch_options["proxy"] = {"server": self.proxy}
             self._browser = self._playwright.chromium.launch(**launch_options)
             self._context = self._browser.new_context(**context_options)
-            self._log("info", "🧭 使用非持久化上下文启动浏览器")
+            self._log("info", f"🧭 使用非持久化上下文启动浏览器 (headless={headless_value})")
 
         # 默认超时配置（毫秒）
         self._context.set_default_timeout(self.timeout * 1000)
