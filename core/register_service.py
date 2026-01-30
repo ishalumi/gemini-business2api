@@ -15,6 +15,7 @@ from core.gptmail_client import GPTMailClient
 from core.moemail_client import MoeMailClient
 from core.gemini_automation import GeminiAutomation
 from core.gemini_automation_uc import GeminiAutomationUC
+from core.gemini_automation_patchright import GeminiAutomationPatchright
 
 logger = logging.getLogger("gemini.register")
 
@@ -220,7 +221,27 @@ class RegisterService(BaseTaskService[RegisterTask]):
 
         log_cb("info", f"🌐 步骤 2/3: 启动浏览器 (引擎={browser_engine}, 无头模式={headless})...")
 
-        if browser_engine == "dp":
+        if browser_engine == "patchright":
+            automation = GeminiAutomationPatchright(
+                user_agent=self.user_agent,
+                proxy=config.basic.proxy_for_auth,
+                headless=headless,
+                stealth_enabled=config.automation.stealth_enabled,
+                webrtc_protect=config.automation.webrtc_protect,
+                timezone=config.automation.timezone,
+                geo_latitude=config.automation.geo_latitude,
+                geo_longitude=config.automation.geo_longitude,
+                geo_accuracy=config.automation.geo_accuracy,
+                random_delay_min_ms=config.automation.random_delay_min_ms,
+                random_delay_max_ms=config.automation.random_delay_max_ms,
+                verification_poll_attempts=config.automation.verification_poll_attempts,
+                verification_poll_interval_seconds=config.automation.verification_poll_interval_seconds,
+                verification_resend_clicks=config.automation.verification_resend_clicks,
+                warmup_enabled=config.automation.warmup_enabled,
+                warmup_duration_seconds=config.automation.warmup_duration_seconds,
+                log_callback=log_cb,
+            )
+        elif browser_engine == "dp":
             # DrissionPage 引擎：支持有头和无头模式
             automation = GeminiAutomation(
                 user_agent=self.user_agent,
@@ -261,6 +282,7 @@ class RegisterService(BaseTaskService[RegisterTask]):
                 verification_resend_clicks=config.automation.verification_resend_clicks,
                 log_callback=log_cb,
             )
+
         # 允许外部取消时立刻关闭浏览器
         self._add_cancel_hook(task.id, lambda: getattr(automation, "stop", lambda: None)())
 
@@ -311,3 +333,5 @@ class RegisterService(BaseTaskService[RegisterTask]):
         log_cb("info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
         return {"success": True, "email": client.email, "config": config_data}
+
+

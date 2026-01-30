@@ -55,7 +55,7 @@ class BasicConfig(BaseModel):
     moemail_api_key: str = Field(default="", description="MoeMail API key")
     moemail_domain: str = Field(default="", description="MoeMail 邮箱域名")
     moemail_verify_ssl: bool = Field(default=True, description="MoeMail SSL校验")
-    browser_engine: str = Field(default="dp", description="浏览器引擎：uc 或 dp")
+    browser_engine: str = Field(default="dp", description="浏览器引擎：dp/uc/patchright")
     browser_headless: bool = Field(default=False, description="自动化浏览器无头模式")
     refresh_window_hours: int = Field(default=1, ge=0, le=24, description="过期刷新窗口（小时）")
     register_default_count: int = Field(default=1, ge=1, description="默认注册数量")
@@ -94,6 +94,7 @@ class RetryConfig(BaseModel):
     account_failure_threshold: int = Field(default=3, ge=1, le=10, description="账户失败阈值")
     stream_auto_retry_times: int = Field(default=1, ge=0, le=5, description="流式输出不完整自动重试次数")
     rate_limit_cooldown_seconds: int = Field(default=3600, ge=60, le=43200, description="429冷却时间（秒，设置面板按分钟）")
+    rate_limit_disable_enabled: bool = Field(default=True, description="启用429限流冷却/禁用")
     session_cache_ttl_seconds: int = Field(default=3600, ge=0, le=86400, description="会话缓存时间（秒，0表示禁用缓存）")
     auto_refresh_accounts_seconds: int = Field(default=60, ge=0, le=600, description="自动刷新账号间隔（秒，0禁用）")
 
@@ -113,6 +114,8 @@ class AutomationConfig(BaseModel):
     verification_poll_attempts: int = Field(default=3, ge=1, le=20, description="验证码轮询次数（每次发送/重发）")
     verification_poll_interval_seconds: int = Field(default=4, ge=1, le=30, description="验证码轮询间隔（秒）")
     verification_resend_clicks: int = Field(default=4, ge=0, le=10, description="验证码重发点击次数（不含首次发送）")
+    warmup_enabled: bool = Field(default=True, description="启用预热流程")
+    warmup_duration_seconds: int = Field(default=5, ge=0, le=60, description="预热停留秒数")
 
     @validator("random_delay_max_ms")
     def validate_random_delay_max(cls, v, values):
@@ -259,6 +262,8 @@ class ConfigManager:
             if value < 60 or value > 43200:  # 不在 1-720 分钟范围，默认 60 分钟
                 retry_data["rate_limit_cooldown_seconds"] = 3600
 
+        retry_data["rate_limit_disable_enabled"] = _parse_bool(retry_data.get("rate_limit_disable_enabled"), True)
+
         retry_config = RetryConfig(**retry_data)
 
         # 加载自动化配置（反检测/时区/地理位置/随机延迟）
@@ -292,6 +297,17 @@ class ConfigManager:
             between_max = between_min
         automation_data["between_account_min_seconds"] = between_min
         automation_data["between_account_max_seconds"] = between_max
+
+        try:
+            warmup_duration = int(automation_data.get("warmup_duration_seconds", 5))
+        except Exception:
+            warmup_duration = 5
+        if warmup_duration < 0:
+            warmup_duration = 0
+        if warmup_duration > 60:
+            warmup_duration = 60
+        automation_data["warmup_duration_seconds"] = warmup_duration
+        automation_data["warmup_enabled"] = _parse_bool(automation_data.get("warmup_enabled"), True)
 
         try:
             poll_attempts = int(automation_data.get("verification_poll_attempts", 3))
@@ -531,3 +547,11 @@ class _ConfigProxy:
         return config_manager.config.session
 
 config = _ConfigProxy()
+
+
+
+
+
+
+
+

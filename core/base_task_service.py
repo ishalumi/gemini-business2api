@@ -80,6 +80,7 @@ class BaseTaskService(Generic[T]):
         user_agent: str,
         account_failure_threshold: int,
         rate_limit_cooldown_seconds: int,
+        rate_limit_disable_enabled: bool,
         session_cache_ttl_seconds: int,
         global_stats_provider: Callable[[], dict],
         set_multi_account_mgr: Optional[Callable[[Any], None]] = None,
@@ -93,7 +94,7 @@ class BaseTaskService(Generic[T]):
             http_client: HTTP客户端
             user_agent: 用户代理
             account_failure_threshold: 账户失败阈值
-            rate_limit_cooldown_seconds: 速率限制冷却秒数
+            rate_limit_cooldown_seconds: 速率限制冷却秒数`r`n            rate_limit_disable_enabled: 是否启用429限流冷却/禁用`r`n            rate_limit_disable_enabled: 是否启用429限流冷却/禁用
             session_cache_ttl_seconds: 会话缓存TTL秒数
             global_stats_provider: 全局统计提供者
             set_multi_account_mgr: 设置多账户管理器的回调
@@ -329,3 +330,5 @@ class BaseTaskService(Generic[T]):
         self.multi_account_mgr = new_mgr
         if self.set_multi_account_mgr:
             self.set_multi_account_mgr(new_mgr)
+
+

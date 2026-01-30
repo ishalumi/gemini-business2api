@@ -105,12 +105,12 @@ def format_account_expiration(remaining_hours: Optional[float]) -> tuple:
 
 class AccountManager:
     """单个账户管理器"""
-    def __init__(self, config: AccountConfig, http_client, user_agent: str, account_failure_threshold: int, rate_limit_cooldown_seconds: int):
+    def __init__(self, config: AccountConfig, http_client, user_agent: str, account_failure_threshold: int, rate_limit_cooldown_seconds: int, rate_limit_disable_enabled: bool):
         self.config = config
         self.http_client = http_client
         self.user_agent = user_agent
         self.account_failure_threshold = account_failure_threshold
-        self.rate_limit_cooldown_seconds = rate_limit_cooldown_seconds
+        self.rate_limit_cooldown_seconds = rate_limit_cooldown_seconds`r`n        self.rate_limit_disable_enabled = rate_limit_disable_enabled
         self.jwt_manager: Optional['JWTManager'] = None  # 延迟初始化
         self.is_available = True
         self.last_error_time = 0.0
@@ -172,6 +172,13 @@ class AccountManager:
 
         # 429限流错误：按配额类型冷却或全局冷却
         if status_code == 429:
+            if not self.rate_limit_disable_enabled:
+                logger.warning(
+                    f"[ACCOUNT] [{self.config.account_id}] {req_tag}"
+                    f"遇到429限流，但已关闭限流冷却，跳过禁用"
+                    f"{': ' + error_detail[:100] if error_detail else ''}"
+                )
+                return
             if quota_type and quota_type in QUOTA_TYPES:
                 # 按配额类型冷却（不影响账户整体可用性）
                 self.quota_cooldowns[quota_type] = time.time()
@@ -452,9 +459,9 @@ class MultiAccountManager:
             if account_mgr.jwt_manager is not None:
                 account_mgr.jwt_manager.http_client = http_client
 
-    def add_account(self, config: AccountConfig, http_client, user_agent: str, account_failure_threshold: int, rate_limit_cooldown_seconds: int, global_stats: dict):
+    def add_account(self, config: AccountConfig, http_client, user_agent: str, account_failure_threshold: int, rate_limit_cooldown_seconds: int, rate_limit_disable_enabled: bool, global_stats: dict):
         """添加账户"""
-        manager = AccountManager(config, http_client, user_agent, account_failure_threshold, rate_limit_cooldown_seconds)
+        manager = AccountManager(config, http_client, user_agent, account_failure_threshold, rate_limit_cooldown_seconds, rate_limit_disable_enabled)
         # 从统计数据加载对话次数
         if "account_conversations" in global_stats:
             manager.conversation_count = global_stats["account_conversations"].get(config.account_id, 0)
@@ -579,6 +586,7 @@ def load_multi_account_config(
     user_agent: str,
     account_failure_threshold: int,
     rate_limit_cooldown_seconds: int,
+    rate_limit_disable_enabled: bool,
     session_cache_ttl_seconds: int,
     global_stats: dict
 ) -> MultiAccountManager:
@@ -615,7 +623,7 @@ def load_multi_account_config(
         if is_expired:
             logger.warning(f"[CONFIG] 账户 {config.account_id} 已过期，仍加载用于展示")
 
-        manager.add_account(config, http_client, user_agent, account_failure_threshold, rate_limit_cooldown_seconds, global_stats)
+        manager.add_account(config, http_client, user_agent, account_failure_threshold, rate_limit_cooldown_seconds, rate_limit_disable_enabled, global_stats)
         if is_expired:
             manager.accounts[config.account_id].is_available = False
 
@@ -632,6 +640,7 @@ def reload_accounts(
     user_agent: str,
     account_failure_threshold: int,
     rate_limit_cooldown_seconds: int,
+    rate_limit_disable_enabled: bool,
     session_cache_ttl_seconds: int,
     global_stats: dict
 ) -> MultiAccountManager:
@@ -650,6 +659,7 @@ def reload_accounts(
         user_agent,
         account_failure_threshold,
         rate_limit_cooldown_seconds,
+        rate_limit_disable_enabled,
         session_cache_ttl_seconds,
         global_stats
     )
@@ -678,6 +688,7 @@ def update_accounts_config(
     user_agent: str,
     account_failure_threshold: int,
     rate_limit_cooldown_seconds: int,
+    rate_limit_disable_enabled: bool,
     session_cache_ttl_seconds: int,
     global_stats: dict
 ) -> MultiAccountManager:
@@ -690,6 +701,7 @@ def update_accounts_config(
         user_agent,
         account_failure_threshold,
         rate_limit_cooldown_seconds,
+        rate_limit_disable_enabled,
         session_cache_ttl_seconds,
         global_stats
     )
@@ -702,6 +714,7 @@ def delete_account(
     user_agent: str,
     account_failure_threshold: int,
     rate_limit_cooldown_seconds: int,
+    rate_limit_disable_enabled: bool,
     session_cache_ttl_seconds: int,
     global_stats: dict
 ) -> MultiAccountManager:
@@ -715,6 +728,7 @@ def delete_account(
         user_agent,
         account_failure_threshold,
         rate_limit_cooldown_seconds,
+        rate_limit_disable_enabled,
         session_cache_ttl_seconds,
         global_stats
     )
@@ -728,6 +742,7 @@ def update_account_disabled_status(
     user_agent: str,
     account_failure_threshold: int,
     rate_limit_cooldown_seconds: int,
+    rate_limit_disable_enabled: bool,
     session_cache_ttl_seconds: int,
     global_stats: dict
 ) -> MultiAccountManager:
@@ -758,3 +773,7 @@ def bulk_update_account_disabled_status(
     status_text = "已禁用" if disabled else "已启用"
     logger.info(f"[CONFIG] 批量{status_text} {updated}/{len(account_ids)} 个账户")
     return updated, errors
+
+
+
+

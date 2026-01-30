@@ -366,6 +366,7 @@ MAX_ACCOUNT_SWITCH_TRIES = config.retry.max_account_switch_tries
 ACCOUNT_FAILURE_THRESHOLD = config.retry.account_failure_threshold
 STREAM_AUTO_RETRY_TIMES = config.retry.stream_auto_retry_times
 RATE_LIMIT_COOLDOWN_SECONDS = config.retry.rate_limit_cooldown_seconds
+        RATE_LIMIT_DISABLE_ENABLED = config.retry.rate_limit_disable_enabled
 SESSION_CACHE_TTL_SECONDS = config.retry.session_cache_ttl_seconds
 AUTO_REFRESH_ACCOUNTS_SECONDS = config.retry.auto_refresh_accounts_seconds
 
@@ -454,6 +455,7 @@ multi_account_mgr = load_multi_account_config(
     USER_AGENT,
     ACCOUNT_FAILURE_THRESHOLD,
     RATE_LIMIT_COOLDOWN_SECONDS,
+    RATE_LIMIT_DISABLE_ENABLED,
     SESSION_CACHE_TTL_SECONDS,
     global_stats
 )
@@ -482,6 +484,7 @@ try:
         USER_AGENT,
         ACCOUNT_FAILURE_THRESHOLD,
         RATE_LIMIT_COOLDOWN_SECONDS,
+        RATE_LIMIT_DISABLE_ENABLED,
         SESSION_CACHE_TTL_SECONDS,
         _get_global_stats,
         _set_multi_account_mgr,
@@ -492,6 +495,7 @@ try:
         USER_AGENT,
         ACCOUNT_FAILURE_THRESHOLD,
         RATE_LIMIT_COOLDOWN_SECONDS,
+        RATE_LIMIT_DISABLE_ENABLED,
         SESSION_CACHE_TTL_SECONDS,
         _get_global_stats,
         _set_multi_account_mgr,
@@ -887,6 +891,7 @@ async def auto_refresh_accounts_task():
                     USER_AGENT,
                     ACCOUNT_FAILURE_THRESHOLD,
                     RATE_LIMIT_COOLDOWN_SECONDS,
+                    RATE_LIMIT_DISABLE_ENABLED,
                     SESSION_CACHE_TTL_SECONDS,
                     global_stats
                 )
@@ -1437,6 +1442,7 @@ async def admin_update_config(request: Request, accounts_data: list = Body(...))
         multi_account_mgr = _update_accounts_config(
             accounts_data, multi_account_mgr, http_client, USER_AGENT,
             ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS,
+            RATE_LIMIT_DISABLE_ENABLED,
             SESSION_CACHE_TTL_SECONDS, global_stats
         )
         return {"status": "success", "message": "配置已更新", "account_count": len(multi_account_mgr.accounts)}
@@ -1550,6 +1556,7 @@ async def admin_import_accounts_config(
         multi_account_mgr = _update_accounts_config(
             merged, multi_account_mgr, http_client, USER_AGENT,
             ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS,
+            RATE_LIMIT_DISABLE_ENABLED,
             SESSION_CACHE_TTL_SECONDS, global_stats
         )
 
@@ -1699,6 +1706,7 @@ async def admin_delete_account(request: Request, account_id: str):
         multi_account_mgr = _delete_account(
             account_id, multi_account_mgr, http_client, USER_AGENT,
             ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS,
+            RATE_LIMIT_DISABLE_ENABLED,
             SESSION_CACHE_TTL_SECONDS, global_stats
         )
         return {"status": "success", "message": f"账户 {account_id} 已删除", "account_count": len(multi_account_mgr.accounts)}
@@ -1715,6 +1723,7 @@ async def admin_disable_account(request: Request, account_id: str):
         multi_account_mgr = _update_account_disabled_status(
             account_id, True, multi_account_mgr, http_client, USER_AGENT,
             ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS,
+            RATE_LIMIT_DISABLE_ENABLED,
             SESSION_CACHE_TTL_SECONDS, global_stats
         )
         return {"status": "success", "message": f"账户 {account_id} 已禁用", "account_count": len(multi_account_mgr.accounts)}
@@ -1731,6 +1740,7 @@ async def admin_enable_account(request: Request, account_id: str):
         multi_account_mgr = _update_account_disabled_status(
             account_id, False, multi_account_mgr, http_client, USER_AGENT,
             ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS,
+            RATE_LIMIT_DISABLE_ENABLED,
             SESSION_CACHE_TTL_SECONDS, global_stats
         )
 
@@ -1819,6 +1829,7 @@ async def admin_get_settings(request: Request):
             "account_failure_threshold": config.retry.account_failure_threshold,
             "stream_auto_retry_times": config.retry.stream_auto_retry_times,
             "rate_limit_cooldown_seconds": config.retry.rate_limit_cooldown_seconds,
+            "rate_limit_disable_enabled": config.retry.rate_limit_disable_enabled,
             "session_cache_ttl_seconds": config.retry.session_cache_ttl_seconds,
             "auto_refresh_accounts_seconds": config.retry.auto_refresh_accounts_seconds
         },
@@ -1835,7 +1846,9 @@ async def admin_get_settings(request: Request):
             "between_account_max_seconds": config.automation.between_account_max_seconds,
             "verification_poll_attempts": config.automation.verification_poll_attempts,
             "verification_poll_interval_seconds": config.automation.verification_poll_interval_seconds,
-            "verification_resend_clicks": config.automation.verification_resend_clicks
+            "verification_resend_clicks": config.automation.verification_resend_clicks,
+            "warmup_enabled": config.automation.warmup_enabled,
+            "warmup_duration_seconds": config.automation.warmup_duration_seconds
         },
         "public_display": {
             "logo_url": config.public_display.logo_url,
@@ -1853,7 +1866,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
     global API_KEY, PROXY_FOR_AUTH, PROXY_FOR_CHAT, BASE_URL, LOGO_URL, CHAT_URL
     global IMAGE_GENERATION_ENABLED, IMAGE_GENERATION_MODELS
     global MAX_NEW_SESSION_TRIES, MAX_REQUEST_RETRIES, MAX_ACCOUNT_SWITCH_TRIES
-    global ACCOUNT_FAILURE_THRESHOLD, STREAM_AUTO_RETRY_TIMES, RATE_LIMIT_COOLDOWN_SECONDS, SESSION_CACHE_TTL_SECONDS, AUTO_REFRESH_ACCOUNTS_SECONDS
+    global ACCOUNT_FAILURE_THRESHOLD, STREAM_AUTO_RETRY_TIMES, RATE_LIMIT_COOLDOWN_SECONDS, RATE_LIMIT_DISABLE_ENABLED, SESSION_CACHE_TTL_SECONDS, AUTO_REFRESH_ACCOUNTS_SECONDS
     global SESSION_EXPIRE_HOURS, multi_account_mgr, http_client, http_client_chat, http_client_auth
 
     try:
@@ -1900,6 +1913,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
 
         retry = dict(new_settings.get("retry") or {})
         retry.setdefault("auto_refresh_accounts_seconds", config.retry.auto_refresh_accounts_seconds)
+        retry.setdefault("rate_limit_disable_enabled", config.retry.rate_limit_disable_enabled)
         retry.setdefault("stream_auto_retry_times", config.retry.stream_auto_retry_times)
         new_settings["retry"] = retry
 
@@ -1917,6 +1931,8 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         automation.setdefault("verification_poll_attempts", config.automation.verification_poll_attempts)
         automation.setdefault("verification_poll_interval_seconds", config.automation.verification_poll_interval_seconds)
         automation.setdefault("verification_resend_clicks", config.automation.verification_resend_clicks)
+        automation.setdefault("warmup_enabled", config.automation.warmup_enabled)
+        automation.setdefault("warmup_duration_seconds", config.automation.warmup_duration_seconds)
         new_settings["automation"] = automation
 
         # 保存旧配置用于对比
@@ -1925,6 +1941,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         old_retry_config = {
             "account_failure_threshold": ACCOUNT_FAILURE_THRESHOLD,
             "rate_limit_cooldown_seconds": RATE_LIMIT_COOLDOWN_SECONDS,
+            "rate_limit_disable_enabled": RATE_LIMIT_DISABLE_ENABLED,
             "session_cache_ttl_seconds": SESSION_CACHE_TTL_SECONDS
         }
 
@@ -1949,6 +1966,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         ACCOUNT_FAILURE_THRESHOLD = config.retry.account_failure_threshold
         STREAM_AUTO_RETRY_TIMES = config.retry.stream_auto_retry_times
         RATE_LIMIT_COOLDOWN_SECONDS = config.retry.rate_limit_cooldown_seconds
+        RATE_LIMIT_DISABLE_ENABLED = config.retry.rate_limit_disable_enabled
         SESSION_CACHE_TTL_SECONDS = config.retry.session_cache_ttl_seconds
         AUTO_REFRESH_ACCOUNTS_SECONDS = config.retry.auto_refresh_accounts_seconds
         SESSION_EXPIRE_HOURS = config.session.expire_hours
@@ -2013,6 +2031,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         retry_changed = (
             old_retry_config["account_failure_threshold"] != ACCOUNT_FAILURE_THRESHOLD or
             old_retry_config["rate_limit_cooldown_seconds"] != RATE_LIMIT_COOLDOWN_SECONDS or
+            old_retry_config["rate_limit_disable_enabled"] != RATE_LIMIT_DISABLE_ENABLED or
             old_retry_config["session_cache_ttl_seconds"] != SESSION_CACHE_TTL_SECONDS
         )
 
@@ -2023,6 +2042,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
             for account_id, account_mgr in multi_account_mgr.accounts.items():
                 account_mgr.account_failure_threshold = ACCOUNT_FAILURE_THRESHOLD
                 account_mgr.rate_limit_cooldown_seconds = RATE_LIMIT_COOLDOWN_SECONDS
+                account_mgr.rate_limit_disable_enabled = RATE_LIMIT_DISABLE_ENABLED
 
         logger.info(f"[CONFIG] 系统设置已更新并实时生效")
         return {"status": "success", "message": "设置已保存并实时生效！"}
@@ -3071,3 +3091,14 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", "7860"))
     timeout_keep_alive = int(os.getenv("UVICORN_TIMEOUT_KEEP_ALIVE", "120"))
     uvicorn.run(app, host="0.0.0.0", port=port, timeout_keep_alive=timeout_keep_alive)
+
+
+
+
+
+
+
+
+
+
+

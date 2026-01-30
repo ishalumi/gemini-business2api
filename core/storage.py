@@ -185,7 +185,7 @@ async def _kv_set(table: str, key: str, value: dict) -> None:
         await conn.execute(
             f"""
             INSERT INTO {table} (key, value, updated_at)
-            VALUES ($1, $2, CURRENT_TIMESTAMP)
+            VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
             ON CONFLICT (key) DO UPDATE SET
                 value = EXCLUDED.value,
                 updated_at = CURRENT_TIMESTAMP
@@ -247,7 +247,7 @@ async def save_accounts(accounts: list) -> bool:
                 await conn.execute(
                     """
                     INSERT INTO accounts (account_id, position, data, updated_at)
-                    VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                    VALUES ($1, $2, $3::jsonb, CURRENT_TIMESTAMP)
                     ON CONFLICT (account_id) DO UPDATE SET
                         position = EXCLUDED.position,
                         data = EXCLUDED.data,
@@ -283,18 +283,19 @@ async def has_accounts() -> bool:
 
 async def update_account_disabled(account_id: str, disabled: bool) -> bool:
     """Update disabled status for a single account."""
+    payload = json.dumps({"disabled": disabled}, ensure_ascii=False)
     pool = await _get_postgres_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
             UPDATE accounts
-            SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object('disabled', to_jsonb($2::boolean)),
+            SET data = COALESCE(data, '{}'::jsonb) || $2::jsonb,
                 updated_at = CURRENT_TIMESTAMP
             WHERE account_id = $1
             RETURNING account_id
             """,
             account_id,
-            disabled,
+            payload,
         )
         return row is not None
 
@@ -303,6 +304,7 @@ async def bulk_update_accounts_disabled(account_ids: list[str], disabled: bool) 
     """Bulk update disabled status."""
     if not account_ids:
         return 0, []
+    payload = json.dumps({"disabled": disabled}, ensure_ascii=False)
     pool = await _get_postgres_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -314,12 +316,12 @@ async def bulk_update_accounts_disabled(account_ids: list[str], disabled: bool) 
             await conn.execute(
                 """
                 UPDATE accounts
-                SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object('disabled', to_jsonb($2::boolean)),
+                SET data = COALESCE(data, '{}'::jsonb) || $2::jsonb,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE account_id = ANY($1::text[])
                 """,
                 list(found),
-                disabled,
+                payload,
             )
         missing = [acc_id for acc_id in account_ids if acc_id not in found]
         return len(found), missing
@@ -436,7 +438,7 @@ async def save_task_history_entry(entry_id: str, data: dict, created_at: Optiona
             await conn.execute(
                 """
                 INSERT INTO task_history (id, data, created_at)
-                VALUES ($1, $2, $3)
+                VALUES ($1, $2::jsonb, $3)
                 ON CONFLICT (id) DO UPDATE SET
                     data = EXCLUDED.data,
                     created_at = EXCLUDED.created_at
@@ -493,3 +495,7 @@ def load_task_history_sync(limit: int = 100) -> list:
 
 def clear_task_history_sync() -> int:
     return _run_in_db_loop(clear_task_history())
+
+
+
+

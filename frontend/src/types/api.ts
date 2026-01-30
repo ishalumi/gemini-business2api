@@ -123,6 +123,8 @@ export interface Settings {
     verification_poll_attempts: number
     verification_poll_interval_seconds: number
     verification_resend_clicks: number
+    warmup_enabled: boolean
+    warmup_duration_seconds: number
   }
   public_display: {
     logo_url?: string
@@ -291,3 +293,4 @@ export interface LoginTask {
   cancel_requested?: boolean
   cancel_reason?: string | null
 }
+

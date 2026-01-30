@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="space-y-8">
     <section v-if="isLoading" class="rounded-3xl border border-border bg-card p-6 text-sm text-muted-foreground">
       正在加载设置...
@@ -122,7 +122,7 @@
                   <div class="space-y-2">
                     <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                       <label for="basic-browser-engine">浏览器引擎</label>
-                      <HelpTip text="UC: 支持无头/有头，但可能失败。DP: 支持无头/有头，更稳定，推荐使用。" />
+                      <HelpTip text="Patchright: 反检测更强（推荐）。DP: 稳定；UC: 兼容但成功率不稳。" />
                     </div>
                     <SelectMenu
                       id="basic-browser-engine"
@@ -382,6 +382,32 @@
                     <p class="text-xs text-muted-foreground">
                       重发次数不含首次发送；总点击次数 = 1 + 重发次数
                     </p>
+                  </div>
+                </div>
+                <div class="border-t border-border/60 pt-4 space-y-4">
+                  <p class="text-xs font-medium text-foreground">预热流程</p>
+                  <div class="space-y-2">
+                    <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <Checkbox v-model="localSettings.automation.warmup_enabled">
+                        启用预热流程
+                      </Checkbox>
+                      <HelpTip text="访问 Google 系网站建立信任" />
+                    </div>
+                    <div class="space-y-2">
+                      <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <label for="automation-warmup-duration">预热停留秒数</label>
+                        <HelpTip text="每个预热页面的停留时间" />
+                      </div>
+                      <input
+                        id="automation-warmup-duration"
+                        v-model.number="localSettings.automation.warmup_duration_seconds"
+                        type="number"
+                        min="0"
+                        max="60"
+                        class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                        placeholder="5"
+                      />
+                    </div>
                   </div>
                 </div>
                 <div class="border-t border-border/60 pt-4 space-y-4">
@@ -690,8 +716,9 @@ const rateLimitCooldownMinutes = computed({
 })
 
 const browserEngineOptions = [
+  { label: 'Patchright - 反检测更强（推荐）', value: 'patchright' },
+  { label: 'DP - 支持无头/有头', value: 'dp' },
   { label: 'UC - 支持无头/有头', value: 'uc' },
-  { label: 'DP - 支持无头/有头（推荐）', value: 'dp' },
 ]
 const mailProviderOptions = [
   { label: 'DuckMail', value: 'duckmail' },
@@ -803,6 +830,10 @@ watch(settings, (value) => {
   next.automation.verification_resend_clicks = Number.isFinite(next.automation.verification_resend_clicks)
     ? next.automation.verification_resend_clicks
     : 4
+  next.automation.warmup_enabled = next.automation.warmup_enabled ?? true
+  next.automation.warmup_duration_seconds = Number.isFinite(next.automation.warmup_duration_seconds)
+    ? next.automation.warmup_duration_seconds
+    : 5
   next.automation.between_account_min_seconds = Number.isFinite(next.automation.between_account_min_seconds)
     ? next.automation.between_account_min_seconds
     : 0
@@ -839,3 +870,8 @@ const handleSave = async () => {
   }
 }
 </script>
+
+
+
+
+
