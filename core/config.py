@@ -51,7 +51,7 @@ class BasicConfig(BaseModel):
     gptmail_base_url: str = Field(default="https://mail.chatgpt.org.uk", description="GPTMail API地址")
     gptmail_api_key: str = Field(default="", description="GPTMail API key")
     gptmail_verify_ssl: bool = Field(default=True, description="GPTMail SSL校验")
-    moemail_base_url: str = Field(default="https://mail.ishalumi.me", description="MoeMail API地址")
+    moemail_base_url: str = Field(default="", description="MoeMail API地址")
     moemail_api_key: str = Field(default="", description="MoeMail API key")
     moemail_domain: str = Field(default="", description="MoeMail 邮箱域名")
     moemail_verify_ssl: bool = Field(default=True, description="MoeMail SSL校验")
@@ -232,7 +232,7 @@ class ConfigManager:
             gptmail_base_url=basic_data.get("gptmail_base_url") or "https://mail.chatgpt.org.uk",
             gptmail_api_key=str(gptmail_api_key_raw or "").strip(),
             gptmail_verify_ssl=_parse_bool(basic_data.get("gptmail_verify_ssl"), True),
-            moemail_base_url=basic_data.get("moemail_base_url") or "https://mail.ishalumi.me",
+            moemail_base_url=basic_data.get("moemail_base_url") or "",
             moemail_api_key=str(moemail_api_key_raw or "").strip(),
             moemail_domain=str(moemail_domain_raw or "").strip(),
             moemail_verify_ssl=_parse_bool(basic_data.get("moemail_verify_ssl"), True),
