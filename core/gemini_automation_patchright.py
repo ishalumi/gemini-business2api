@@ -185,7 +185,8 @@ class GeminiAutomationPatchright:
         self._context.set_default_timeout(self.timeout * 1000)
         self._context.set_default_navigation_timeout(self.timeout * 1000)
 
-        if self.stealth_enabled:
+        # 注意：使用代理时禁用 stealth 脚本，因为 add_init_script 与代理组合会导致 ERR_CONNECTION_CLOSED
+        if self.stealth_enabled and not self.proxy:
             try:
                 self._context.add_init_script(
                     """
