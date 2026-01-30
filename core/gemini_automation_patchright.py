@@ -146,8 +146,7 @@ class GeminiAutomationPatchright:
             }
 
         if self.proxy:
-            if self._use_persistent_context:
-                context_options["proxy"] = {"server": self.proxy}
+            context_options["proxy"] = {"server": self.proxy}
             self._log("info", f"🌐 使用代理: {self.proxy}")
         if self.user_agent:
             context_options["user_agent"] = self.user_agent
@@ -172,8 +171,6 @@ class GeminiAutomationPatchright:
                 "headless": headless_value,
                 "args": args,
             }
-            if self.proxy:
-                launch_options["proxy"] = {"server": self.proxy}
             self._browser = self._playwright.chromium.launch(**launch_options)
             self._context = self._browser.new_context(**context_options)
             self._log("info", f"🧭 使用非持久化上下文启动浏览器 (headless={headless_value})")
