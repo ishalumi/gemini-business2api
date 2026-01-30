@@ -324,6 +324,7 @@ class BaseTaskService(Generic[T]):
             self.user_agent,
             self.account_failure_threshold,
             self.rate_limit_cooldown_seconds,
+            self.rate_limit_disable_enabled,
             self.session_cache_ttl_seconds,
             global_stats,
         )
