@@ -288,7 +288,7 @@ async def update_account_disabled(account_id: str, disabled: bool) -> bool:
         row = await conn.fetchrow(
             """
             UPDATE accounts
-            SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object('disabled', $2),
+            SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object('disabled', to_jsonb($2::boolean)),
                 updated_at = CURRENT_TIMESTAMP
             WHERE account_id = $1
             RETURNING account_id
@@ -314,7 +314,7 @@ async def bulk_update_accounts_disabled(account_ids: list[str], disabled: bool) 
             await conn.execute(
                 """
                 UPDATE accounts
-                SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object('disabled', $2),
+                SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object('disabled', to_jsonb($2::boolean)),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE account_id = ANY($1::text[])
                 """,
