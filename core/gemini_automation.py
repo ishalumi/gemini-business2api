@@ -271,7 +271,7 @@ class GeminiAutomation:
         # Step 2: 检查当前页面状态
         current_url = page.url
         self._log("info", f"📍 当前 URL: {current_url}")
-        has_business_params = "business.gemini.google" in current_url and "csesidx=" in current_url and "/cid/" in current_url
+        has_business_params = "business.gemini.google" in current_url and ("csesidx=" in current_url or "/cid/" in current_url)
 
         if has_business_params:
             self._log("info", "✅ 检测到已登录，直接提取配置")
@@ -391,7 +391,7 @@ class GeminiAutomation:
 
         # Step 9: 检查是否已经在正确的页面
         current_url = page.url
-        has_business_params = "business.gemini.google" in current_url and "csesidx=" in current_url and "/cid/" in current_url
+        has_business_params = "business.gemini.google" in current_url and ("csesidx=" in current_url or "/cid/" in current_url)
 
         if has_business_params:
             # 已经在正确的页面，不需要再次导航
@@ -577,10 +577,12 @@ class GeminiAutomation:
         return False
 
     def _wait_for_business_params(self, page, timeout: int = 30) -> bool:
-        """等待业务页面参数生成（csesidx 和 cid）"""
+        """等待业务页面参数生成（csesidx 或 cid 任一即可）"""
         for _ in range(timeout):
             url = page.url
-            if "csesidx=" in url and "/cid/" in url:
+            # csesidx 是登录成功的标志，/cid/ 是已在业务页面
+            # 新账户可能在 /admin/create?csesidx=xxx，老账户在 /cid/xxx?csesidx=xxx
+            if "csesidx=" in url or "/cid/" in url:
                 self._log("info", f"business params ready: {url}")
                 return True
             self._sleep(1)
