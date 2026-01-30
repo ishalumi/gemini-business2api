@@ -276,14 +276,14 @@ class GeminiAutomationPatchright:
                 {
                     "name": "__Host-AP_SignInXsrf",
                     "value": DEFAULT_XSRF_TOKEN,
-                    "url": AUTH_HOME_URL,
+                    "domain": "auth.business.gemini.google",
                     "path": "/",
                     "secure": True,
                 },
                 {
                     "name": "_GRECAPTCHA",
                     "value": "09ABCL...",
-                    "url": "https://google.com",
+                    "domain": ".google.com",
                     "path": "/",
                     "secure": True,
                 },
