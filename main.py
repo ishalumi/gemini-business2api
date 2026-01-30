@@ -366,7 +366,7 @@ MAX_ACCOUNT_SWITCH_TRIES = config.retry.max_account_switch_tries
 ACCOUNT_FAILURE_THRESHOLD = config.retry.account_failure_threshold
 STREAM_AUTO_RETRY_TIMES = config.retry.stream_auto_retry_times
 RATE_LIMIT_COOLDOWN_SECONDS = config.retry.rate_limit_cooldown_seconds
-        RATE_LIMIT_DISABLE_ENABLED = config.retry.rate_limit_disable_enabled
+RATE_LIMIT_DISABLE_ENABLED = config.retry.rate_limit_disable_enabled
 SESSION_CACHE_TTL_SECONDS = config.retry.session_cache_ttl_seconds
 AUTO_REFRESH_ACCOUNTS_SECONDS = config.retry.auto_refresh_accounts_seconds
 
