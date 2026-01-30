@@ -69,9 +69,13 @@ class GeminiAutomationPatchright:
         self.log_callback = log_callback
 
         self._playwright = None
+        self._browser = None
         self._context = None
         self._page = None
         self._user_data_dir = None
+        self._use_persistent_context = True
+        self._force_headless = False
+        self._skip_warmup_once = False
 
     def stop(self) -> None:
         """外部请求停止：尽力关闭浏览器实例。"""
@@ -82,23 +86,36 @@ class GeminiAutomationPatchright:
 
     def login_and_extract(self, email: str, mail_client) -> dict:
         """执行登录并提取配置"""
-        try:
-            self._create_context()
-            if self.warmup_enabled:
-                self._run_warmup()
-            return self._run_flow(self._page, email, mail_client)
-        except TaskCancelledError:
-            raise
-        except Exception as exc:
-            self._log("error", f"automation error: {exc}")
-            return {"success": False, "error": str(exc)}
-        finally:
-            self._cleanup()
+        attempt = 0
+        last_error = None
+        while attempt < 2:
+            try:
+                self._create_context()
+                if self.warmup_enabled and not self._skip_warmup_once:
+                    self._run_warmup()
+                return self._run_flow(self._page, email, mail_client)
+            except TaskCancelledError:
+                raise
+            except Exception as exc:
+                last_error = exc
+                if attempt == 0 and self._is_network_error(exc):
+                    self._log("warning", "⚠️ 检测到网络连接异常，尝试切换非持久上下文并强制无头重试")
+                    self._use_persistent_context = False
+                    self._force_headless = True
+                    self._skip_warmup_once = True
+                    attempt += 1
+                    continue
+                self._log("error", f"automation error: {exc}")
+                return {"success": False, "error": str(exc)}
+            finally:
+                self._cleanup()
+        return {"success": False, "error": str(last_error) if last_error else "unknown error"}
 
     def _create_context(self) -> None:
         """创建 Patchright 浏览器上下文"""
         self._playwright = sync_playwright().start()
         self._user_data_dir = tempfile.mkdtemp(prefix="patchright_")
+        headless_value = True if self._force_headless else self.headless
 
         args = [
             "--no-sandbox",
@@ -117,15 +134,22 @@ class GeminiAutomationPatchright:
         if self.proxy:
             args.append(f"--proxy-server={self.proxy}")
 
-        context_options = {
-            "headless": self.headless,
-            "no_viewport": True,
-            "locale": "zh-CN",
-            "args": args,
-        }
+        if self._use_persistent_context:
+            context_options = {
+                "headless": headless_value,
+                "no_viewport": True,
+                "locale": "zh-CN",
+                "args": args,
+            }
+        else:
+            context_options = {
+                "locale": "zh-CN",
+                "viewport": None,
+            }
 
         if self.proxy:
-            context_options["proxy"] = {"server": self.proxy}
+            if self._use_persistent_context:
+                context_options["proxy"] = {"server": self.proxy}
             self._log("info", f"🌐 使用代理: {self.proxy}")
         if self.user_agent:
             context_options["user_agent"] = self.user_agent
@@ -139,10 +163,22 @@ class GeminiAutomationPatchright:
             }
             context_options["permissions"] = ["geolocation"]
 
-        self._context = self._playwright.chromium.launch_persistent_context(
-            user_data_dir=self._user_data_dir,
-            **context_options,
-        )
+        if self._use_persistent_context:
+            self._context = self._playwright.chromium.launch_persistent_context(
+                user_data_dir=self._user_data_dir,
+                **context_options,
+            )
+            self._log("info", "🧭 使用持久化上下文启动浏览器")
+        else:
+            launch_options = {
+                "headless": headless_value,
+                "args": args,
+            }
+            if self.proxy:
+                launch_options["proxy"] = {"server": self.proxy}
+            self._browser = self._playwright.chromium.launch(**launch_options)
+            self._context = self._browser.new_context(**context_options)
+            self._log("info", "🧭 使用非持久化上下文启动浏览器")
 
         # 默认超时配置（毫秒）
         self._context.set_default_timeout(self.timeout * 1000)
@@ -678,6 +714,13 @@ class GeminiAutomationPatchright:
                 pass
         self._context = None
 
+        if self._browser:
+            try:
+                self._browser.close()
+            except Exception:
+                pass
+        self._browser = None
+
         if self._playwright:
             try:
                 self._playwright.stop()
@@ -699,3 +742,17 @@ class GeminiAutomationPatchright:
                 shutil.rmtree(user_data_dir, ignore_errors=True)
         except Exception:
             pass
+
+    @staticmethod
+    def _is_network_error(exc: Exception) -> bool:
+        """判断是否为网络连接类错误"""
+        msg = str(exc)
+        markers = (
+            "net::ERR_CONNECTION_CLOSED",
+            "net::ERR_CONNECTION_RESET",
+            "net::ERR_CONNECTION_REFUSED",
+            "net::ERR_TIMED_OUT",
+            "net::ERR_NAME_NOT_RESOLVED",
+            "ERR_PROXY_CONNECTION_FAILED",
+        )
+        return any(marker in msg for marker in markers)
