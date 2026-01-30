@@ -110,7 +110,8 @@ class AccountManager:
         self.http_client = http_client
         self.user_agent = user_agent
         self.account_failure_threshold = account_failure_threshold
-        self.rate_limit_cooldown_seconds = rate_limit_cooldown_seconds`r`n        self.rate_limit_disable_enabled = rate_limit_disable_enabled
+        self.rate_limit_cooldown_seconds = rate_limit_cooldown_seconds
+        self.rate_limit_disable_enabled = rate_limit_disable_enabled
         self.jwt_manager: Optional['JWTManager'] = None  # 延迟初始化
         self.is_available = True
         self.last_error_time = 0.0
