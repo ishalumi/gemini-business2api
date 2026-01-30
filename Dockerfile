@@ -34,6 +34,7 @@ RUN apt-get update && \
         libcairo2 fonts-liberation fonts-noto-cjk && \
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
     pip install --no-cache-dir -r requirements.txt && \
+    patchright install chromium && \
     apt-get purge -y gcc && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
