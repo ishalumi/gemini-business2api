@@ -117,6 +117,7 @@ class BaseTaskService(Generic[T]):
         self.user_agent = user_agent
         self.account_failure_threshold = account_failure_threshold
         self.rate_limit_cooldown_seconds = rate_limit_cooldown_seconds
+        self.rate_limit_disable_enabled = rate_limit_disable_enabled
         self.session_cache_ttl_seconds = session_cache_ttl_seconds
         self.global_stats_provider = global_stats_provider
         self.set_multi_account_mgr = set_multi_account_mgr
