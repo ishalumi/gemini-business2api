@@ -50,7 +50,7 @@ class GeminiAutomationPatchright:
         log_callback=None,
     ) -> None:
         self.user_agent = user_agent or ""
-        self.proxy = proxy
+        self.proxy = str(proxy or "").strip()
         self.headless = headless
         self.stealth_enabled = stealth_enabled
         self.webrtc_protect = webrtc_protect
@@ -106,12 +106,16 @@ class GeminiAutomationPatchright:
             "--disable-setuid-sandbox",
             "--disable-blink-features=AutomationControlled",
             "--window-size=1280,800",
+            "--disable-quic",
+            "--disable-http2",
         ]
         if self.webrtc_protect:
             args.extend([
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
                 "--webrtc-ip-handling-policy=disable_non_proxied_udp",
             ])
+        if self.proxy:
+            args.append(f"--proxy-server={self.proxy}")
 
         context_options = {
             "headless": self.headless,
@@ -122,6 +126,7 @@ class GeminiAutomationPatchright:
 
         if self.proxy:
             context_options["proxy"] = {"server": self.proxy}
+            self._log("info", f"🌐 使用代理: {self.proxy}")
         if self.user_agent:
             context_options["user_agent"] = self.user_agent
         if self.timezone:
