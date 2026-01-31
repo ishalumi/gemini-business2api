@@ -1,6 +1,7 @@
 """
-Gemini自动化登录模块（使用 Patchright）
+Gemini自动化登录模块（使用 Patchright 异步 API）
 """
+import asyncio
 import os
 import random
 import string
@@ -10,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote
 
-from patchright.sync_api import sync_playwright
+from patchright.async_api import async_playwright
 
 from core.base_task_service import TaskCancelledError
 
@@ -81,20 +82,46 @@ class GeminiAutomationPatchright:
     def stop(self) -> None:
         """外部请求停止：尽力关闭浏览器实例。"""
         try:
-            self._cleanup()
+            # 异步清理需要在事件循环中执行
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._cleanup())
+            except RuntimeError:
+                # 没有运行中的事件循环，创建新的来执行清理
+                asyncio.run(self._cleanup())
         except Exception:
             pass
 
     def login_and_extract(self, email: str, mail_client) -> dict:
-        """执行登录并提取配置"""
+        """执行登录并提取配置（同步包装器）"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # 在已有事件循环中，创建新线程运行异步代码
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    asyncio.run,
+                    self._login_and_extract_async(email, mail_client)
+                )
+                return future.result()
+        else:
+            # 没有运行中的事件循环，直接运行
+            return asyncio.run(self._login_and_extract_async(email, mail_client))
+
+    async def _login_and_extract_async(self, email: str, mail_client) -> dict:
+        """执行登录并提取配置（异步实现）"""
         attempt = 0
         last_error = None
         while attempt < 2:
             try:
-                self._create_context()
+                await self._create_context()
                 if self.warmup_enabled and not self._skip_warmup_once:
-                    self._run_warmup()
-                return self._run_flow(self._page, email, mail_client)
+                    await self._run_warmup()
+                return await self._run_flow(self._page, email, mail_client)
             except TaskCancelledError:
                 raise
             except Exception as exc:
@@ -109,17 +136,17 @@ class GeminiAutomationPatchright:
                 self._log("error", f"automation error: {exc}")
                 return {"success": False, "error": str(exc)}
             finally:
-                self._cleanup()
+                await self._cleanup()
         return {"success": False, "error": str(last_error) if last_error else "unknown error"}
 
-    def _create_context(self) -> None:
-        """创建 Patchright 浏览器上下文"""
+    async def _create_context(self) -> None:
+        """创建 Patchright 浏览器上下文（异步）"""
         # 确保 DISPLAY 环境变量已设置（用于 headed 模式）
         if not os.environ.get("DISPLAY") and not self.headless and not self._force_headless:
             os.environ["DISPLAY"] = ":99"
             self._log("info", "🖥️ 设置 DISPLAY=:99 用于 headed 模式")
 
-        self._playwright = sync_playwright().start()
+        self._playwright = await async_playwright().start()
         self._user_data_dir = tempfile.mkdtemp(prefix="patchright_")
         headless_value = True if self._force_headless else self.headless
 
@@ -166,7 +193,7 @@ class GeminiAutomationPatchright:
             context_options["permissions"] = ["geolocation"]
 
         if self._use_persistent_context:
-            self._context = self._playwright.chromium.launch_persistent_context(
+            self._context = await self._playwright.chromium.launch_persistent_context(
                 user_data_dir=self._user_data_dir,
                 **context_options,
             )
@@ -177,8 +204,8 @@ class GeminiAutomationPatchright:
                 "args": args,
             }
             self._log("info", f"🔧 context_options: {context_options}")
-            self._browser = self._playwright.chromium.launch(**launch_options)
-            self._context = self._browser.new_context(**context_options)
+            self._browser = await self._playwright.chromium.launch(**launch_options)
+            self._context = await self._browser.new_context(**context_options)
             self._log("info", f"🧭 使用非持久化上下文启动浏览器 (headless={headless_value})")
 
         # 默认超时配置（毫秒）
@@ -188,7 +215,7 @@ class GeminiAutomationPatchright:
         # 注意：使用代理时禁用 stealth 脚本，因为 add_init_script 与代理组合会导致 ERR_CONNECTION_CLOSED
         if self.stealth_enabled and not self.proxy:
             try:
-                self._context.add_init_script(
+                await self._context.add_init_script(
                     """
                     Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
                     Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
@@ -204,37 +231,37 @@ class GeminiAutomationPatchright:
             except Exception:
                 pass
 
-        self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
+        self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
 
-    def _run_warmup(self) -> None:
-        """预热流程：访问 Google 系网站建立信任"""
+    async def _run_warmup(self) -> None:
+        """预热流程：访问 Google 系网站建立信任（异步）"""
         for url in WARMUP_URLS:
             try:
                 self._log("info", f"🔥 预热访问: {url}")
-                self._page.goto(url, wait_until="domcontentloaded")
-                self._simulate_human_behavior(self._page)
-                self._sleep(self.warmup_duration_seconds)
+                await self._page.goto(url, wait_until="domcontentloaded")
+                await self._simulate_human_behavior(self._page)
+                await self._async_sleep(self.warmup_duration_seconds)
             except Exception as exc:
                 self._log("warning", f"⚠️ 预热异常: {exc}")
 
-    def _simulate_human_behavior(self, page) -> None:
-        """模拟人类行为（鼠标移动、滚动）"""
+    async def _simulate_human_behavior(self, page) -> None:
+        """模拟人类行为（鼠标移动、滚动）（异步）"""
         try:
             for _ in range(random.randint(2, 5)):
                 x = random.randint(100, 900)
                 y = random.randint(100, 700)
-                page.mouse.move(x, y)
-                time.sleep(random.uniform(0.1, 0.3))
-            page.mouse.wheel(0, random.randint(120, 480))
+                await page.mouse.move(x, y)
+                await asyncio.sleep(random.uniform(0.1, 0.3))
+            await page.mouse.wheel(0, random.randint(120, 480))
         except Exception:
             pass
 
-    def _sleep(self, base_seconds: float) -> None:
-        """随机化等待时间"""
+    async def _async_sleep(self, base_seconds: float) -> None:
+        """异步随机化等待时间"""
         extra = 0.0
         if self.random_delay_max_ms > 0:
             extra = random.uniform(self.random_delay_min_ms, self.random_delay_max_ms) / 1000.0
-        time.sleep(max(0, base_seconds) + extra)
+        await asyncio.sleep(max(0, base_seconds) + extra)
 
     @staticmethod
     def _normalize_selector(selector: str) -> str:
@@ -244,35 +271,37 @@ class GeminiAutomationPatchright:
             return selector[4:]
         return selector
 
-    def _query(self, page, selector: str, timeout_ms: int = 0):
+    async def _query(self, page, selector: str, timeout_ms: int = 0):
+        """异步查询元素"""
         selector = self._normalize_selector(selector)
         try:
             if timeout_ms and timeout_ms > 0:
-                return page.wait_for_selector(selector, timeout=timeout_ms)
-            return page.query_selector(selector)
+                return await page.wait_for_selector(selector, timeout=timeout_ms)
+            return await page.query_selector(selector)
         except Exception:
             return None
 
-    def _query_all(self, page, selector: str):
+    async def _query_all(self, page, selector: str):
+        """异步查询所有匹配元素"""
         selector = self._normalize_selector(selector)
         try:
-            return page.query_selector_all(selector) or []
+            return await page.query_selector_all(selector) or []
         except Exception:
             return []
 
-    def _run_flow(self, page, email: str, mail_client) -> dict:
-        """执行登录流程"""
+    async def _run_flow(self, page, email: str, mail_client) -> dict:
+        """执行登录流程（异步）"""
         send_time = datetime.now()
 
         # Step 1: 导航到首页并设置 Cookie
         self._log("info", f"🌐 正在打开登录页面: {email}")
-        page.goto(AUTH_HOME_URL, wait_until="domcontentloaded")
-        self._sleep(2)
+        await page.goto(AUTH_HOME_URL, wait_until="domcontentloaded")
+        await self._async_sleep(2)
 
         # 设置两个关键 Cookie
         try:
             self._log("info", "🍪 正在设置认证 Cookies...")
-            self._context.add_cookies([
+            await self._context.add_cookies([
                 {
                     "name": "__Host-AP_SignInXsrf",
                     "value": DEFAULT_XSRF_TOKEN,
@@ -299,8 +328,8 @@ class GeminiAutomationPatchright:
             f"&xsrfToken={DEFAULT_XSRF_TOKEN}"
         )
         self._log("info", "🔗 正在访问登录链接...")
-        page.goto(login_url, wait_until="domcontentloaded")
-        self._sleep(5)
+        await page.goto(login_url, wait_until="domcontentloaded")
+        await self._async_sleep(5)
 
         # Step 2: 检查当前页面状态
         current_url = page.url
@@ -310,21 +339,21 @@ class GeminiAutomationPatchright:
         )
         if has_business_params:
             self._log("info", "✅ 检测到已登录，直接提取配置")
-            return self._extract_config(page, email)
+            return await self._extract_config(page, email)
 
         # Step 3: 点击发送验证码按钮
         self._log("info", "🔘 正在查找并点击发送验证码按钮...")
-        if not self._click_send_code_button(page):
+        if not await self._click_send_code_button(page):
             self._log("error", "❌ 未找到发送验证码按钮")
-            self._save_screenshot(page, "send_code_button_missing")
+            await self._save_screenshot(page, "send_code_button_missing")
             return {"success": False, "error": "send code button not found"}
 
         # Step 4: 等待验证码输入框出现
         self._log("info", "⏳ 等待验证码输入框出现...")
-        code_input = self._wait_for_code_input(page)
+        code_input = await self._wait_for_code_input(page)
         if not code_input:
             self._log("error", "❌ 验证码输入框未出现")
-            self._save_screenshot(page, "code_input_missing")
+            await self._save_screenshot(page, "code_input_missing")
             return {"success": False, "error": "code input not found"}
 
         # Step 5: 轮询邮件获取验证码
@@ -333,14 +362,14 @@ class GeminiAutomationPatchright:
         if not code:
             if self.verification_resend_clicks <= 0:
                 self._log("error", "❌ 验证码获取超时")
-                self._save_screenshot(page, "code_timeout")
+                await self._save_screenshot(page, "code_timeout")
                 return {"success": False, "error": "verification code timeout"}
             self._log("warning", f"⚠️ 验证码获取超时，准备重发 {self.verification_resend_clicks} 次...")
             for attempt in range(self.verification_resend_clicks):
                 send_time = datetime.now()
-                if not self._click_resend_code_button(page):
+                if not await self._click_resend_code_button(page):
                     self._log("error", "❌ 未找到重新发送按钮")
-                    self._save_screenshot(page, "resend_button_missing")
+                    await self._save_screenshot(page, "resend_button_missing")
                     return {"success": False, "error": "resend code button not found"}
                 self._log("info", f"🔄 已点击重新发送按钮 ({attempt + 1}/{self.verification_resend_clicks})，等待新验证码...")
                 code = self._poll_for_verification_code(mail_client, send_time)
@@ -348,34 +377,34 @@ class GeminiAutomationPatchright:
                     break
             if not code:
                 self._log("error", "❌ 多次重发后仍未收到验证码")
-                self._save_screenshot(page, "code_timeout_after_resend")
+                await self._save_screenshot(page, "code_timeout_after_resend")
                 return {"success": False, "error": "verification code timeout after resend"}
 
         self._log("info", f"✅ 收到验证码: {code}")
 
         # Step 6: 输入验证码并提交
-        code_input = self._query(page, "css:input[jsname='ovqh0b']", timeout_ms=3000) or \
-                     self._query(page, "css:input[type='tel']", timeout_ms=2000)
+        code_input = await self._query(page, "css:input[jsname='ovqh0b']", timeout_ms=3000) or \
+                     await self._query(page, "css:input[type='tel']", timeout_ms=2000)
 
         if not code_input:
             self._log("error", "❌ 验证码输入框已失效")
             return {"success": False, "error": "code input expired"}
 
         self._log("info", "⌨️ 正在输入验证码 (模拟人类输入)...")
-        if not self._simulate_human_input(code_input, code):
+        if not await self._simulate_human_input(code_input, code):
             self._log("warning", "⚠️ 模拟输入失败，降级为直接输入")
             try:
-                code_input.fill(code)
+                await code_input.fill(code)
             except Exception:
                 pass
-            self._sleep(0.5)
+            await self._async_sleep(0.5)
 
         self._log("info", "⏎ 按下回车键提交验证码")
         try:
-            code_input.press("Enter")
+            await code_input.press("Enter")
         except Exception:
             try:
-                page.keyboard.press("Enter")
+                await page.keyboard.press("Enter")
             except Exception:
                 pass
 
@@ -388,7 +417,7 @@ class GeminiAutomationPatchright:
 
         for attempt in range(max_submit_attempts):
             for _ in range(wait_rounds):
-                self._sleep(wait_interval)
+                await self._async_sleep(wait_interval)
                 current_url = page.url
                 if "verify-oob-code" not in current_url:
                     break
@@ -399,82 +428,82 @@ class GeminiAutomationPatchright:
             if attempt < max_submit_attempts - 1:
                 self._log("warning", f"⚠️ 未跳转，重试提交验证码 ({attempt + 1}/{max_submit_attempts - 1})")
                 try:
-                    code_input.press("Enter")
+                    await code_input.press("Enter")
                 except Exception:
                     pass
-                submit_btn = self._query(page, "css:button[type='submit']", timeout_ms=2000)
+                submit_btn = await self._query(page, "css:button[type='submit']", timeout_ms=2000)
                 if not submit_btn:
                     keywords = ["Verify", "Continue", "提交", "继续", "确认", "下一步", "验证"]
-                    for btn in self._query_all(page, "tag:button"):
-                        text = (btn.inner_text() or "").strip()
+                    for btn in await self._query_all(page, "tag:button"):
+                        text = (await btn.inner_text() or "").strip()
                         if text and any(kw in text for kw in keywords):
                             submit_btn = btn
                             break
                 if submit_btn:
                     try:
-                        submit_btn.click()
+                        await submit_btn.click()
                     except Exception:
                         pass
 
         self._log("info", f"📍 验证后 URL: {current_url}")
         if "verify-oob-code" in current_url:
             self._log("error", "❌ 验证码提交失败，仍停留在验证页面")
-            self._save_screenshot(page, "verification_submit_failed")
+            await self._save_screenshot(page, "verification_submit_failed")
             return {"success": False, "error": "verification code submission failed"}
 
         # Step 8: 处理协议页面
-        self._handle_agreement_page(page)
+        await self._handle_agreement_page(page)
 
         # Step 9: 检查是否已经在正确的页面
         current_url = page.url
         has_business_params = "business.gemini.google" in current_url and "csesidx=" in current_url and "/cid/" in current_url
         if has_business_params:
             self._log("info", "already on business page with parameters")
-            return self._extract_config(page, email)
+            return await self._extract_config(page, email)
 
         # Step 10: 如果不在正确的页面，尝试导航
         if "business.gemini.google" not in current_url:
             self._log("info", "navigating to business page")
-            page.goto("https://business.gemini.google/", wait_until="domcontentloaded")
-            self._sleep(5)
+            await page.goto("https://business.gemini.google/", wait_until="domcontentloaded")
+            await self._async_sleep(5)
             current_url = page.url
             self._log("info", f"URL after navigation: {current_url}")
 
         # Step 11: 检查是否需要设置用户名
         if "cid" not in page.url:
-            if self._handle_username_setup(page):
-                self._sleep(5)
+            if await self._handle_username_setup(page):
+                await self._async_sleep(5)
 
         # Step 12: 等待 URL 参数生成
         self._log("info", "waiting for URL parameters")
-        if not self._wait_for_business_params(page):
+        if not await self._wait_for_business_params(page):
             self._log("warning", "URL parameters not generated, trying refresh")
             try:
-                page.reload(wait_until="domcontentloaded")
+                await page.reload(wait_until="domcontentloaded")
             except Exception:
                 pass
-            self._sleep(5)
-            if not self._wait_for_business_params(page):
+            await self._async_sleep(5)
+            if not await self._wait_for_business_params(page):
                 self._log("error", "URL parameters generation failed")
                 current_url = page.url
                 self._log("error", f"final URL: {current_url}")
-                self._save_screenshot(page, "params_missing")
+                await self._save_screenshot(page, "params_missing")
                 return {"success": False, "error": "URL parameters not found"}
 
         # Step 13: 提取配置
         self._log("info", "🎊 登录流程完成，正在提取配置...")
-        return self._extract_config(page, email)
+        return await self._extract_config(page, email)
 
-    def _click_send_code_button(self, page) -> bool:
-        """点击发送验证码按钮（如果需要）"""
-        self._sleep(2)
+    async def _click_send_code_button(self, page) -> bool:
+        """点击发送验证码按钮（如果需要）（异步）"""
+        await self._async_sleep(2)
 
-        direct_btn = self._query(page, "#sign-in-with-email", timeout_ms=5000)
+        direct_btn = await self._query(page, "#sign-in-with-email", timeout_ms=5000)
         if direct_btn:
             try:
-                direct_btn.click()
+                await direct_btn.click()
                 self._log("info", "✅ 找到并点击了发送验证码按钮 (ID: #sign-in-with-email)")
-                self._sleep(3)
+                await self._async_sleep(3)
                 return True
             except Exception as e:
                 self._log("warning", f"⚠️ 点击按钮失败: {e}")
@@ -482,25 +511,25 @@ class GeminiAutomationPatchright:
         keywords = ["通过电子邮件发送验证码", "通过电子邮件发送", "email", "Email", "Send code", "Send verification", "Verification code"]
         try:
             self._log("info", f"🔍 通过关键词搜索按钮: {keywords}")
-            for btn in self._query_all(page, "tag:button"):
+            for btn in await self._query_all(page, "tag:button"):
                 try:
-                    text = (btn.inner_text() or "").strip()
+                    text = (await btn.inner_text() or "").strip()
                 except Exception:
                     text = ""
                 if text and any(kw in text for kw in keywords):
                     try:
                         self._log("info", f"✅ 找到匹配按钮: '{text}'")
-                        btn.click()
+                        await btn.click()
                         self._log("info", "✅ 成功点击发送验证码按钮")
-                        self._sleep(3)
+                        await self._async_sleep(3)
                         return True
                     except Exception as e:
                         self._log("warning", f"⚠️ 点击按钮失败: {e}")
         except Exception as e:
             self._log("warning", f"⚠️ 搜索按钮异常: {e}")
 
-        code_input = self._query(page, "css:input[jsname='ovqh0b']", timeout_ms=2000) or \
-                     self._query(page, "css:input[name='pinInput']", timeout_ms=1000)
+        code_input = await self._query(page, "css:input[jsname='ovqh0b']", timeout_ms=2000) or \
+                     await self._query(page, "css:input[name='pinInput']", timeout_ms=1000)
         if code_input:
             self._log("info", "✅ 已在验证码输入页面，无需点击按钮")
             return True
@@ -508,8 +537,8 @@ class GeminiAutomationPatchright:
         self._log("error", "❌ 未找到发送验证码按钮")
         return False
 
-    def _wait_for_code_input(self, page, timeout: int = 30):
-        """等待验证码输入框出现"""
+    async def _wait_for_code_input(self, page, timeout: int = 30):
+        """等待验证码输入框出现（异步）"""
         selectors = [
             "css:input[jsname='ovqh0b']",
             "css:input[type='tel']",
@@ -518,47 +547,47 @@ class GeminiAutomationPatchright:
         ]
         for _ in range(max(1, timeout // 2)):
             for selector in selectors:
-                el = self._query(page, selector, timeout_ms=1000)
+                el = await self._query(page, selector, timeout_ms=1000)
                 if el:
                     return el
-            self._sleep(2)
+            await self._async_sleep(2)
         return None
 
     def _poll_for_verification_code(self, mail_client, since_time) -> Optional[str]:
-        """按配置轮询验证码"""
+        """按配置轮询验证码（同步方法，邮件客户端是同步的）"""
         poll_attempts = max(1, int(self.verification_poll_attempts))
         poll_interval = max(1, int(self.verification_poll_interval_seconds))
         poll_timeout = poll_attempts * poll_interval
         return mail_client.poll_for_code(timeout=poll_timeout, interval=poll_interval, since_time=since_time)
 
-    def _simulate_human_input(self, element, text: str) -> bool:
-        """模拟人类输入（逐字符输入，带随机延迟）"""
+    async def _simulate_human_input(self, element, text: str) -> bool:
+        """模拟人类输入（逐字符输入，带随机延迟）（异步）"""
         try:
-            element.click()
-            time.sleep(random.uniform(0.1, 0.3))
+            await element.click()
+            await asyncio.sleep(random.uniform(0.1, 0.3))
             for char in text:
-                element.type(char, delay=random.randint(50, 150))
-            time.sleep(random.uniform(0.2, 0.5))
+                await element.type(char, delay=random.randint(50, 150))
+            await asyncio.sleep(random.uniform(0.2, 0.5))
             self._log("info", "simulated human input successfully")
             return True
         except Exception as e:
             self._log("warning", f"simulated input failed: {e}")
             return False
 
-    def _click_resend_code_button(self, page) -> bool:
-        """点击重新发送验证码按钮"""
-        self._sleep(2)
+    async def _click_resend_code_button(self, page) -> bool:
+        """点击重新发送验证码按钮（异步）"""
+        await self._async_sleep(2)
         try:
-            for btn in self._query_all(page, "tag:button"):
+            for btn in await self._query_all(page, "tag:button"):
                 try:
-                    text = (btn.inner_text() or "").strip().lower()
+                    text = (await btn.inner_text() or "").strip().lower()
                 except Exception:
                     text = ""
                 if text and ("重新" in text or "resend" in text):
                     try:
                         self._log("info", f"found resend button: {text}")
-                        btn.click()
-                        self._sleep(2)
+                        await btn.click()
+                        await self._async_sleep(2)
                         return True
                     except Exception:
                         pass
@@ -566,26 +595,26 @@ class GeminiAutomationPatchright:
             pass
         return False
 
-    def _handle_agreement_page(self, page) -> None:
-        """处理协议页面"""
+    async def _handle_agreement_page(self, page) -> None:
+        """处理协议页面（异步）"""
         if "/admin/create" in page.url:
-            agree_btn = self._query(page, "css:button.agree-button", timeout_ms=5000)
+            agree_btn = await self._query(page, "css:button.agree-button", timeout_ms=5000)
             if agree_btn:
-                agree_btn.click()
-                self._sleep(2)
+                await agree_btn.click()
+                await self._async_sleep(2)
 
-    def _wait_for_business_params(self, page, timeout: int = 30) -> bool:
-        """等待业务页面参数生成（csesidx 或 cid 任一即可）"""
+    async def _wait_for_business_params(self, page, timeout: int = 30) -> bool:
+        """等待业务页面参数生成（csesidx 或 cid 任一即可）（异步）"""
         for _ in range(timeout):
             url = page.url
             if "csesidx=" in url or "/cid/" in url:
                 self._log("info", f"business params ready: {url}")
                 return True
-            self._sleep(1)
+            await self._async_sleep(1)
         return False
 
-    def _handle_username_setup(self, page) -> bool:
-        """处理用户名设置页面"""
+    async def _handle_username_setup(self, page) -> bool:
+        """处理用户名设置页面（异步）"""
         current_url = page.url
         if "auth.business.gemini.google/login" in current_url:
             return False
@@ -599,7 +628,7 @@ class GeminiAutomationPatchright:
 
         username_input = None
         for selector in selectors:
-            username_input = self._query(page, selector, timeout_ms=2000)
+            username_input = await self._query(page, selector, timeout_ms=2000)
             if username_input:
                 break
 
@@ -610,26 +639,26 @@ class GeminiAutomationPatchright:
         username = f"Test{suffix}"
 
         try:
-            username_input.click()
-            self._sleep(0.2)
+            await username_input.click()
+            await self._async_sleep(0.2)
             try:
-                username_input.fill("")
+                await username_input.fill("")
             except Exception:
                 pass
-            self._sleep(0.1)
+            await self._async_sleep(0.1)
 
-            if not self._simulate_human_input(username_input, username):
+            if not await self._simulate_human_input(username_input, username):
                 self._log("warning", "simulated username input failed, fallback to direct input")
                 try:
-                    username_input.type(username, delay=80)
+                    await username_input.type(username, delay=80)
                 except Exception:
                     pass
-                self._sleep(0.3)
+                await self._async_sleep(0.3)
 
             submit_btn = None
-            for btn in self._query_all(page, "tag:button"):
+            for btn in await self._query_all(page, "tag:button"):
                 try:
-                    text = (btn.inner_text() or "").strip().lower()
+                    text = (await btn.inner_text() or "").strip().lower()
                 except Exception:
                     text = ""
                 if any(kw in text for kw in ["确认", "提交", "继续", "submit", "continue", "confirm", "save", "保存", "下一步", "next"]):
@@ -637,24 +666,24 @@ class GeminiAutomationPatchright:
                     break
 
             if submit_btn:
-                submit_btn.click()
+                await submit_btn.click()
             else:
                 try:
-                    username_input.press("Enter")
+                    await username_input.press("Enter")
                 except Exception:
                     pass
 
-            self._sleep(5)
+            await self._async_sleep(5)
             return True
         except Exception:
             return False
 
-    def _extract_config(self, page, email: str) -> dict:
-        """提取配置"""
+    async def _extract_config(self, page, email: str) -> dict:
+        """提取配置（异步）"""
         try:
             if "cid/" not in page.url:
-                page.goto("https://business.gemini.google/", wait_until="domcontentloaded")
-                self._sleep(3)
+                await page.goto("https://business.gemini.google/", wait_until="domcontentloaded")
+                await self._async_sleep(3)
 
             url = page.url
             if "cid/" not in url:
@@ -663,7 +692,7 @@ class GeminiAutomationPatchright:
             config_id = url.split("cid/")[1].split("?")[0].split("/")[0]
             csesidx = url.split("csesidx=")[1].split("&")[0] if "csesidx=" in url else ""
 
-            cookies = self._context.cookies()
+            cookies = await self._context.cookies()
             ses = next((c["value"] for c in cookies if c["name"] == "__Secure-C_SES"), None)
             host = next((c["value"] for c in cookies if c["name"] == "__Host-C_OSES"), None)
 
@@ -687,13 +716,13 @@ class GeminiAutomationPatchright:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _save_screenshot(self, page, name: str) -> None:
-        """保存截图"""
+    async def _save_screenshot(self, page, name: str) -> None:
+        """保存截图（异步）"""
         try:
             screenshot_dir = os.path.join("data", "automation")
             os.makedirs(screenshot_dir, exist_ok=True)
             path = os.path.join(screenshot_dir, f"{name}_{int(time.time())}.png")
-            page.screenshot(path=path, full_page=True)
+            await page.screenshot(path=path, full_page=True)
         except Exception:
             pass
 
@@ -707,25 +736,25 @@ class GeminiAutomationPatchright:
             except Exception:
                 pass
 
-    def _cleanup(self) -> None:
-        """清理资源"""
+    async def _cleanup(self) -> None:
+        """清理资源（异步）"""
         if self._context:
             try:
-                self._context.close()
+                await self._context.close()
             except Exception:
                 pass
         self._context = None
 
         if self._browser:
             try:
-                self._browser.close()
+                await self._browser.close()
             except Exception:
                 pass
         self._browser = None
 
         if self._playwright:
             try:
-                self._playwright.stop()
+                await self._playwright.stop()
             except Exception:
                 pass
         self._playwright = None
